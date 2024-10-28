@@ -1,0 +1,41 @@
+[build-system]
+requires = [
+    "setuptools >= 40.9.0",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sarcalnet-ingestion"
+dynamic = ["version"]
+authors = [
+    {name = "Thomas Storm", email = "thomas.storm@brockmann-consult.de"}
+]
+description = """\
+  Python tool for registering calibration sites, targets, and surveys to the SARCalNet database \
+  """
+keywords = [
+    "calibration sites", "calibration targets", "calibration target surveys"
+]
+readme = {file = "README.md", content-type = "text/markdown"}
+license = {file = "LICENSE", content-type = "text/markdown"}
+requires-python = ">=3.10"
+dependencies = [
+    "click",
+    "geopandas",
+    "openpyxl",
+    "pandas",
+    "pyproj",
+    "python-dateutil",
+    "requests",
+    "shapely",
+    "xcube_geodb"
+]
+
+[tool.setuptools.dynamic]
+version = {attr = "sarcalnet-ingestion.__version__"}
+
+[project.urls]
+Documentation = "https://www.sarcalnet.org/"
+Issues = "https://github.com/sarcalnet/sarcalnet-submission-tools/issues"
+Changelog = "https://github.com/sarcalnet/sarcalnet-submission-tools/blob/main/CHANGES.md"
+Repository = "https://github.com/sarcalnet/sarcalnet-submission-tools"

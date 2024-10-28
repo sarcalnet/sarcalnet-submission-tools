@@ -1,0 +1,15 @@
+name: sarcalnet-ingestion
+channels:
+  - conda-forge
+
+dependencies:
+  - python >=3.6
+  - click
+  - geopandas
+  - openpyxl
+  - pandas
+  - pyproj
+  - python-dateutil
+  - requests
+  - shapely
+  - xcube_geodb
