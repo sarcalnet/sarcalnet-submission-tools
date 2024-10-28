@@ -1,2 +1,5 @@
 /*.iml
 /.idea/
+/sarcalnet-ingestion/test/*xlsx
+/sarcalnet-ingestion/test/*docx
+/sarcalnet-ingestion/test/*pdf
