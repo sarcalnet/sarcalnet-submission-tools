@@ -988,7 +988,8 @@ def ingest_calibration_info(
     Ingests the calibration sites given in CALIBRATION_SITES_FILE into the database.
     Expects a self-assessment given as SELF_ASSESSMENT_FILE.
 
-    See https://www.sarcalnet.org/?page_id=1050 for directions and templates.
+    See https://www.sarcalnet.org/submission-templates/ for directions and
+    templates (only for registered users).
 
 
     If run without any of the parameters `client_id`, `client_secret`,

@@ -4,7 +4,7 @@ This python package contains the SARCalNet submission tools. The tools can run
 in two modes:
 1) validation mode. Basically, if no credentials to the SARCalNet 
 database are provided, the software validates the input calibration
-sites template, and exists. See below for directions on how to 
+sites template, and exits. See below for directions on how to 
 run in validation mode.
 2) ingestion modes. If the credentials to the SARCalNet database 
 are provided, the software validates the input calibration sites
