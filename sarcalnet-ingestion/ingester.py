@@ -3,6 +3,7 @@ import os
 import string
 import urllib
 import random
+import warnings
 from typing import Optional, List
 
 import dateutil.parser
@@ -309,7 +310,7 @@ class Ingester:
             self.geoDB.insert_into_collection(
                 NAT_TARGETS_COLLECTION, gdf, database=DATABASE, crs=4326
             )
-            print(f"Successfully ingested {len(gdf)} targets.")
+            print(f"Successfully ingested {len(gdf)} natural targets.")
         else:
             print("No targets ingested.")
 
@@ -395,7 +396,7 @@ class Ingester:
             self.geoDB.insert_into_collection(
                 TARGETS_COLLECTION, gdf, database=DATABASE, crs=4326
             )
-            print(f"Successfully ingested {len(gdf)} targets.")
+            print(f"Successfully ingested {len(gdf)} artificial targets.")
         else:
             print("No targets ingested.")
 
@@ -620,6 +621,7 @@ class Ingester:
             self.geoDB.insert_into_collection(
                 NAT_SURVEYS_COLLECTION, gdf, database=DATABASE, crs=4326
             )
+            print(f"Successfully ingested {len(gdf)} surveys of natural targets.")
         else:
             print("No new surveys ingested.")
 
@@ -679,7 +681,7 @@ class Ingester:
             self.geoDB.insert_into_collection(
                 SURVEYS_COLLECTION, gdf, database=DATABASE, crs=4326
             )
-            print(f"Successful ingested {len(gdf)} surveys.")
+            print(f"Successfully ingested {len(gdf)} surveys of artificial targets.")
         else:
             print("No new surveys ingested.")
 
@@ -704,9 +706,9 @@ class Ingester:
                 else:
                     filename = photo_link
 
+                print(f"Uploading {filename}...")
                 with open(filename, mode="rb") as photo_file:
                     contents = photo_file.read()
-                print(f"Uploading {filename}...")
 
                 upload_response = requests.post(
                     "https://www.sarcalnet.org/wp-json/wp/v2/media",
@@ -995,6 +997,8 @@ def ingest_calibration_info(
     and potential errors are reported. Note that not every kind of error
     may automatically be identified.
     """
+
+    warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
     if proj_dir:
         os.environ["PROJ_DIR"] = proj_dir
