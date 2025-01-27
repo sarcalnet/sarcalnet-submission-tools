@@ -5,7 +5,7 @@ requires = [
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "sarcalnet-ingestion"
+name = "scn_db_tools"
 dynamic = ["version"]
 authors = [
     {name = "Thomas Storm", email = "thomas.storm@brockmann-consult.de"}
@@ -32,7 +32,7 @@ dependencies = [
 ]
 
 [tool.setuptools.dynamic]
-version = {attr = "sarcalnet-ingestion.__version__"}
+version = {attr = "scn_db_tools.__version__"}
 
 [project.urls]
 Documentation = "https://www.sarcalnet.org/"

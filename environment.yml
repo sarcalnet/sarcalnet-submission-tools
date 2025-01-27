@@ -1,4 +1,4 @@
-name: sarcalnet-ingestion
+name: scn_db_tools
 channels:
   - conda-forge
 

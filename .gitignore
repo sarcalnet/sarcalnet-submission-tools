@@ -1,5 +1,5 @@
 /*.iml
 /.idea/
-/sarcalnet-ingestion/test/*xlsx
-/sarcalnet-ingestion/test/*docx
-/sarcalnet-ingestion/test/*pdf
+/scn_db_tools/test/*xlsx
+/scn_db_tools/test/*docx
+/scn_db_tools/test/*pdf
