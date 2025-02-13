@@ -150,9 +150,9 @@ class Ingester:
         sites_df = sites_df.drop("Unique Site ID", axis=1)
 
         self.validate_sites(sites_df)
-        print("Successfully validated sites.")
         if self.validation_mode:
             return []
+        print("Sites validation successful.")
 
         sites_df = sites_df.replace(to_replace=np.nan, value="")
         sites_df = sites_df.replace(to_replace="-", value=None)
@@ -198,8 +198,8 @@ class Ingester:
             for col in mandatory_fields:
                 if str(row[1][col]) == "nan":
                     message = (
-                        f"Row {row[0] + 6}: missing entry for mandatory field "
-                        f"'{col}' in sheet 'site'. Please fill in all mandatory fields,"
+                        f"site, row {row[0] + 6}: missing entry for mandatory field "
+                        f"'{col}'. Please fill in all mandatory fields,"
                         f" or remove the entire row."
                     )
                     if self.validation_mode:
@@ -210,8 +210,8 @@ class Ingester:
                 dateutil.parser.parse(row[1]["active_from"])
             except dateutil.parser.ParserError:
                 message = (
-                    f"Row {row[0] + 6}: invalid entry for field 'active_from'.  in "
-                    f"sheet 'site'. Please provide a date or date and time expressed "
+                    f"site, row {row[0] + 6}: invalid entry for field "
+                    f"'active_from'. Please provide a date or date and time expressed "
                     f"in YYYY-MM-dd format (UTC)."
                 )
                 if self.validation_mode:
@@ -224,8 +224,8 @@ class Ingester:
                     dateutil.parser.parse(active_until)
             except dateutil.parser.ParserError:
                 message = (
-                    f"Row {row[0] + 6}: invalid entry for field 'active_until'. in "
-                    f"sheet 'site'. Please provide a date or date and time expressed "
+                    f"site, row {row[0] + 6}: invalid entry for field "
+                    f"'active_until'. Please provide a date or date and time expressed "
                     f"in YYYY-MM-dd format (UTC), or provide '-'. "
                 )
                 if self.validation_mode:
@@ -258,7 +258,7 @@ class Ingester:
             self.ingest_art_targets(art_targets_df)
             return "artificial"
         else:
-            print("Could neither read sheet 'dt' nor 'cr'. No targets ingested.")
+            print("Could neither read dt nor cr. No targets ingested.")
             return "None"
 
     def ingest_nat_targets(self, targets_df: pd.DataFrame):
@@ -286,9 +286,9 @@ class Ingester:
         targets_df = targets_df.replace(to_replace="-", value=None)
 
         self.validate_nat_targets(targets_df)
-        print("Targets validation successful.")
         if self.validation_mode:
             return
+        print("Targets validation successful.")
 
         gdf = gpd.GeoDataFrame(targets_df)
 
@@ -314,9 +314,12 @@ class Ingester:
         for row in nat_targets_df.iterrows():
             for col in mandatory_fields:
                 if str(row[1][col]) == "nan":
-                    message = f"Row {row[0] + 6}: missing entry for mandatory field "
-                    f"'{col}' in 'dt' sheet. Please fill in all mandatory fields, "
-                    f"or remove the entire row."
+                    message = (
+                        f"dt, row {row[0] + 6}: missing entry for "
+                        f"mandatory field '{col}'. Please fill in all"
+                        f" mandatory fields, "
+                        f"or remove the entire row."
+                    )
                     if self.validation_mode:
                         print(message)
                     else:
@@ -365,9 +368,9 @@ class Ingester:
         targets_df = targets_df.replace(math.nan, None)
 
         self.validate_art_targets(targets_df)
-        print("Targets validation successful.")
         if self.validation_mode:
             return
+        print("Targets validation successful.")
 
         self.upload_photos(targets_df)
 
@@ -406,8 +409,10 @@ class Ingester:
         for row in art_targets_df.iterrows():
             for col in mandatory_fields:
                 if str(row[1][col]) == "nan":
-                    message = f"Row {row[0] + 6}: missing entry for mandatory field "
-                    f"'{col}' in 'cr' sheet. Please fill in all mandatory fields, "
+                    message = (
+                        f"cr, row {row[0] + 6}: missing entry for mandatory field "
+                    )
+                    f"'{col}'. Please fill in all mandatory fields, "
                     f"or remove the entire row."
                     if self.validation_mode:
                         print(message)
@@ -416,16 +421,16 @@ class Ingester:
             try:
                 float(row[1]["apprx_latitude"])
             except ValueError:
-                message = f"Row {row[0] + 6}: invalid entry for mandatory field "
-                f"'Approximate Latitude' in 'cr' sheet. Please enter a valid "
+                message = f"cr, row {row[0] + 6}: invalid entry for mandatory field "
+                f"'Approximate Latitude'. Please enter a valid "
                 f"floating point number."
                 if self.validation_mode:
                     print(message)
                 else:
                     raise ValueError(message)
             if row[1]["apprx_latitude"] < -90 or row[1]["apprx_latitude"] > 90:
-                message = f"Row {row[0] + 6}: invalid entry for mandatory field "
-                f"'Approximate Latitude' in 'cr' sheet. Please enter a valid "
+                message = f"cr, row {row[0] + 6}: invalid entry for mandatory field "
+                f"'Approximate Latitude'. Please enter a valid "
                 f"floating point number > -90 and < 90. "
                 if self.validation_mode:
                     print(message)
@@ -434,16 +439,16 @@ class Ingester:
             try:
                 float(row[1]["apprx_longitude"])
             except ValueError:
-                message = f"Row {row[0] + 6}: invalid entry for mandatory field "
-                f"'Approximate Longitude' in 'cr' sheet. Please enter a valid "
+                message = f"cr, row {row[0] + 6}: invalid entry for mandatory field "
+                f"'Approximate Longitude'. Please enter a valid "
                 f"floating point number."
                 if self.validation_mode:
                     print(message)
                 else:
                     raise ValueError(message)
             if row[1]["apprx_longitude"] < -180 or row[1]["apprx_longitude"] > 180:
-                message = f"Row {row[0] + 6}: invalid entry for mandatory field "
-                f"'Approximate Longitude' in 'cr' sheet. Please enter a valid "
+                message = f"cr, row {row[0] + 6}: invalid entry for mandatory field "
+                f"'Approximate Longitude'. Please enter a valid "
                 f"floating point number > -180 and < 180."
                 if self.validation_mode:
                     print(message)
@@ -452,8 +457,8 @@ class Ingester:
             try:
                 float(row[1]["apprx_elevation"])
             except ValueError:
-                message = f"Row {row[0] + 6}: invalid entry for mandatory field "
-                f"'Approximate Elevation' in 'cr' sheet. Please enter a valid "
+                message = f"cr, row {row[0] + 6}: invalid entry for mandatory field "
+                f"'Approximate Elevation'. Please enter a valid "
                 f"floating point number."
                 if self.validation_mode:
                     print(message)
@@ -465,8 +470,8 @@ class Ingester:
                     raise ValueError
             except ValueError:
                 message = (
-                    f"Row {row[0] + 6}: invalid entry for mandatory field "
-                    f"'Side Length' in 'cr' sheet. Please enter a valid "
+                    f"cr, row {row[0] + 6}: invalid entry for mandatory field "
+                    f"'Side Length'. Please enter a valid "
                     f"floating point number > 0."
                 )
                 if self.validation_mode:
@@ -478,8 +483,8 @@ class Ingester:
                     float(row[1]["rcs"])
             except ValueError:
                 message = (
-                    f"Row {row[0] + 6}: invalid entry for field "
-                    f"'RCS' in 'cr' sheet. Please enter a valid "
+                    f"cr, row {row[0] + 6}: invalid entry for field "
+                    f"'RCS'. Please enter a valid "
                     f"floating point number."
                 )
                 if self.validation_mode:
@@ -491,9 +496,9 @@ class Ingester:
                     float(row[1]["rcs_accuracy"])
             except ValueError:
                 message = (
-                    f"Row {row[0] + 6}: invalid entry for field "
-                    f"'Reference RCS measurement expected accuracy (dB)' in 'cr' "
-                    f"sheet. Please enter a valid floating point number."
+                    f"cr, row {row[0] + 6}: invalid entry for field "
+                    f"'Reference RCS measurement expected accuracy (dB)'. "
+                    f"Please enter a valid floating point number."
                 )
                 if self.validation_mode:
                     print(message)
@@ -504,9 +509,9 @@ class Ingester:
                     float(row[1]["rcs_angle"])
             except ValueError:
                 message = (
-                    f"Row {row[0] + 6}: invalid entry for field "
-                    f"'Reference RCS measurement boresite angle (decimal deg)' in 'cr' "
-                    f"sheet. Please enter a valid floating point number."
+                    f"cr, row {row[0] + 6}: invalid entry for field "
+                    f"'Reference RCS measurement boresite angle (decimal deg)'. "
+                    f"Please enter a valid floating point number."
                 )
                 if self.validation_mode:
                     print(message)
@@ -517,9 +522,9 @@ class Ingester:
                     raise ValueError
             except ValueError:
                 message = (
-                    f"Row {row[0] + 6}: invalid entry for field "
-                    f"'Reference RCS measurement wavelength (m)' in 'cr' "
-                    f"sheet. Please enter a valid floating point number > 0."
+                    f"cr, row {row[0] + 6}: invalid entry for field "
+                    f"'Reference RCS measurement wavelength (m)'. Please enter a "
+                    f"valid floating point number > 0."
                 )
                 if self.validation_mode:
                     print(message)
@@ -530,9 +535,9 @@ class Ingester:
                     raise ValueError
             except ValueError:
                 message = (
-                    f"Row {row[0] + 6}: invalid entry for field "
-                    f"'Reference RCS measurement bandwidth (Hz)' in 'cr' "
-                    f"sheet. Please enter a valid floating point number > 0."
+                    f"cr, row {row[0] + 6}: invalid entry for field "
+                    f"'Reference RCS measurement bandwidth (Hz)'. Please enter"
+                    f" a valid floating point number > 0."
                 )
                 if self.validation_mode:
                     print(message)
@@ -678,9 +683,9 @@ class Ingester:
         surveys_df["elevation"] = surveys_df["elevation"].astype(float)
 
         self.validate_art_surveys(surveys_df)
-        print("Surveys validation successful.")
         if self.validation_mode:
             return
+        print("Surveys validation successful.")
 
         self.upload_photos(surveys_df)
 
@@ -770,8 +775,8 @@ class Ingester:
             for col in mandatory_fields:
                 if str(row[1][col]) == "nan":
                     message = (
-                        f"Row {row[0] + 6}: missing entry for mandatory field "
-                        f"'{col}' in 'surveys' sheet. Please fill in all mandatory "
+                        f"surveys, row {row[0] + 6}: missing entry for mandatory field "
+                        f"'{col}'. Please fill in all mandatory "
                         f"fields, or remove the entire row."
                     )
                     if self.validation_mode:
@@ -782,8 +787,9 @@ class Ingester:
                 dateutil.parser.parse(row[1]["survey_start"])
             except dateutil.parser.ParserError:
                 message = (
-                    f"Row {row[0] + 6}: invalid entry '{row[1]['survey_start']}' for mandatory field "
-                    f"'Survey start (YYYY-MM-DD)' in 'surveys' sheet. Please enter a "
+                    f"surveys, row {row[0] + 6}: invalid entry "
+                    f"'{row[1]['survey_start']}' for mandatory field "
+                    f"'Survey start (YYYY-MM-DD)'. Please enter a "
                     f"valid date."
                 )
                 if self.validation_mode:
@@ -795,8 +801,9 @@ class Ingester:
                     dateutil.parser.parse(row[1]["survey_stop"])
             except dateutil.parser.ParserError:
                 message = (
-                    f"Row {row[0] + 6}: invalid entry '{row[1]['survey_stop']}' for mandatory field "
-                    f"'Stop Monitoring Period (YYYY-MM-DD or \"-\")' in 'surveys' sheet. Please enter a "
+                    f"surveys, row {row[0] + 6}: invalid entry "
+                    f"'{row[1]['survey_stop']}' for mandatory field "
+                    f"'Stop Monitoring Period (YYYY-MM-DD or \"-\")'. Please enter a "
                     f"valid date. "
                 )
                 if self.validation_mode:
@@ -825,8 +832,8 @@ class Ingester:
             for col in mandatory_fields:
                 if str(row[1][col]) == "nan":
                     message = (
-                        f"Row {row[0] + 6}: missing entry for mandatory field "
-                        f"'{col}' in 'surveys' sheet. Please fill in all mandatory "
+                        f"surveys, row {row[0] + 6}: missing entry for "
+                        f"mandatory field '{col}'. Please fill in all mandatory "
                         f"fields, or remove the entire row."
                     )
                     if self.validation_mode:
@@ -837,57 +844,179 @@ class Ingester:
                 dateutil.parser.parse(row[1]["survey_date"])
             except dateutil.parser.ParserError:
                 message = (
-                    f"Row {row[0] + 6}: invalid entry '{row[1]['survey_date']}' for mandatory field "
-                    f"'Survey date (YYYY-MM-DD)' in 'surveys' sheet. Please enter a "
-                    f"valid date."
+                    f"surveys, row {row[0] + 6}: invalid entry "
+                    f"'{row[1]['survey_date']}' for mandatory field "
+                    f"'Survey date (YYYY-MM-DD)'. Please enter a valid date."
                 )
                 if self.validation_mode:
                     print(message)
                 else:
                     raise ValueError(message)
-            if row[1]["lat"] < -90 or row[1]["lat"] > 90:
-                message = (
-                    f"Row {row[0] + 6}: invalid entry '{row[1]['lat']}' for mandatory field "
-                    f"'Latitude (decimal deg)' in 'surveys' sheet. Please enter a "
-                    f"valid floating point number > -90 and < 90."
-                )
-                if self.validation_mode:
-                    print(message)
-                else:
-                    raise ValueError(message)
-            if row[1]["lon"] < -180 or row[1]["lon"] > 180:
-                message = (
-                    f"Row {row[0] + 6}: invalid entry '{row[1]['lon']}' for mandatory field "
-                    f"'Longitude (decimal deg)' in 'surveys' sheet. Please enter a "
-                    f"valid floating point number > -180 and < 180."
-                )
-                if self.validation_mode:
-                    print(message)
-                else:
-                    raise ValueError(message)
-            if row[1]["position_accuracy"] <= 0:
-                message = (
-                    f"Row {row[0] + 6}: invalid entry '{row[1]['position_accuracy']}' "
-                    f"for mandatory field 'Position accuracy (cm)' in 'surveys' sheet. Please enter a "
-                    f"valid floating point number > 0."
-                )
-                if self.validation_mode:
-                    print(message)
-                else:
-                    raise ValueError(message)
-            crs = row[1]["coordinate_reference_system"]
-            try:
-                pyproj.CRS.from_user_input(crs)
-            except pyproj.exceptions.CRSError:
-                message = (
-                    f"Row {row[0] + 6}: invalid entry '{crs}' for mandatory field "
-                    f"'Coordinate Reference System (WKT or EPSG)' in 'surveys' sheet. "
-                    f"Please enter a valid WKT or EPSG (e.g. EPSG:4326)."
-                )
-                if self.validation_mode:
-                    print(message)
-                else:
-                    raise ValueError(message)
+
+            self.validate_lat(row)
+            self.validate_lon(row)
+            self.validate_position_accuracy(row)
+            self.validate_crs(row)
+            self.validate_azimuth_angle(row)
+            self.validate_boresight_angle(row)
+            self.validate_tilt(row)
+            self.validate_accuracy(row)
+            self.validate_duration(row)
+
+    def validate_lat(self, row):
+        if row[1]["lat"] < -90 or row[1]["lat"] > 90:
+            message = (
+                f"surveys, row {row[0] + 6}: invalid entry '{row[1]['lat']}' "
+                f"for mandatory field 'Latitude (decimal deg)'. Please enter a "
+                f"valid floating point number > -90 and < 90."
+            )
+            if self.validation_mode:
+                print(message)
+            else:
+                raise ValueError(message)
+
+    def validate_lon(self, row):
+        if row[1]["lon"] < -180 or row[1]["lon"] > 180:
+            message = (
+                f"surveys, row {row[0] + 6}: invalid entry '{row[1]['lon']}' "
+                f"for mandatory field 'Longitude (decimal deg)'. Please enter a "
+                f"valid floating point number > -180 and < 180."
+            )
+            if self.validation_mode:
+                print(message)
+            else:
+                raise ValueError(message)
+
+    def validate_position_accuracy(self, row):
+        message = (
+            f"surveys, row {row[0] + 6}: invalid entry "
+            f"'{row[1]['position_accuracy']}' for mandatory field 'Position accuracy "
+            f"(cm)'. Please enter a valid floating point number > 0."
+        )
+        try:
+            float(row[1]["position_accuracy"])
+        except ValueError:
+            if self.validation_mode:
+                print(message)
+                return
+            else:
+                raise ValueError(message)
+        if row[1]["position_accuracy"] <= 0:
+            if self.validation_mode:
+                print(message)
+            else:
+                raise ValueError(message)
+
+    def validate_crs(self, row):
+        crs = row[1]["coordinate_reference_system"]
+        try:
+            pyproj.CRS.from_user_input(crs)
+        except pyproj.exceptions.CRSError:
+            message = (
+                f"surveys, row {row[0] + 6}: invalid entry '{crs}' for "
+                f"mandatory field 'Coordinate Reference System (WKT or EPSG)'. "
+                f"Please enter a valid WKT or EPSG (e.g. EPSG:4326)."
+            )
+            if self.validation_mode:
+                print(message)
+            else:
+                raise ValueError(message)
+
+    def validate_duration(self, row):
+        try:
+            dateutil.parser.parse(row[1]["duration"])
+        except dateutil.parser.ParserError:
+            message = (
+                f"surveys, row {row[0] + 6}: invalid entry for field "
+                f"'GNSS measurement duration (hh:mm:ss)'."
+                f"Please provide a time expressed "
+                f"in hh:mm:ss format."
+            )
+            if self.validation_mode:
+                print(message)
+            else:
+                raise ValueError(message)
+
+    def validate_tilt(self, row):
+        message = (
+            f"surveys, row {row[0] + 6}: invalid entry '{row[1]['tilt']}' "
+            f"for mandatory field 'Tilt angle (decimal deg)'. Please enter a "
+            f"valid floating point number >= 0 and < 360."
+        )
+        try:
+            float(row[1]["tilt"])
+        except ValueError:
+            if self.validation_mode:
+                print(message)
+                return
+            else:
+                raise ValueError(message)
+        if type(row[1]["tilt"]) == str or row[1]["tilt"] < 0 or row[1]["tilt"] >= 360:
+            if self.validation_mode:
+                print(message)
+            else:
+                raise ValueError(message)
+
+    def validate_boresight_angle(self, row):
+        message = (
+            f"surveys, row {row[0] + 6}: invalid entry '{row[1]['boresight_angle']}' "
+            f"for mandatory field 'Boresight angle (decimal deg)'. Please enter a "
+            f"valid floating point number >= 0 and <= 90."
+        )
+        try:
+            float(row[1]["boresight_angle"])
+        except ValueError:
+            if self.validation_mode:
+                print(message)
+                return
+            else:
+                raise ValueError(message)
+        if row[1]["boresight_angle"] < 0 or row[1]["boresight_angle"] > 90:
+            if self.validation_mode:
+                print(message)
+            else:
+                raise ValueError(message)
+
+    def validate_azimuth_angle(self, row):
+        message = (
+            f"surveys, row {row[0] + 6}: invalid entry '{row[1]['azimuth_angle']}' for "
+            f"mandatory field 'Azimuth angle (decimal deg)'. Please enter a "
+            f"valid floating point number >= 0 and < 360."
+        )
+        try:
+            float(row[1]["azimuth_angle"])
+        except ValueError:
+            if self.validation_mode:
+                print(message)
+                return
+            else:
+                raise ValueError(message)
+        if float(row[1]["azimuth_angle"]) < 0 or float(row[1]["azimuth_angle"]) >= 360:
+            if self.validation_mode:
+                print(message)
+            else:
+                raise ValueError(message)
+
+    def validate_accuracy(self, row):
+        message = (
+            f"surveys, row {row[0] + 6}: invalid entry '{row[1]['accuracy']}' "
+            f"for mandatory field 'Pointing accuracy (decimal deg)'. Please enter a "
+            f"valid floating point number >= 0."
+        )
+        try:
+            float(row[1]["accuracy"])
+        except ValueError:
+            if self.validation_mode:
+                print(message)
+                return
+            else:
+                raise ValueError(message)
+
+        if row[1]["accuracy"] < 0:
+            if self.validation_mode:
+                print(message)
+            else:
+                raise ValueError(message)
 
     def upload_file(
         self,
@@ -991,7 +1120,8 @@ class Ingester:
                 return row
             else:
                 message = (
-                    f"Invalid value for field 'centroid' in row {row.name + 6}. "
+                    f"site, row {row.name + 6}: Invalid value for field "
+                    f"'centroid'."
                     f"Please either provide a position given by comma-separated "
                     f"lat and lon values (e.g. 36.578, 120.356), or provide the "
                     f"position as WKT (e.g. POINT(120.356 36.578)), or leave the "
