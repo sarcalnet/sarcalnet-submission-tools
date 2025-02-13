@@ -31,32 +31,6 @@ SURVEYS_COLLECTION = "calibration_surveys_dev"
 NAT_SURVEYS_COLLECTION = "calibration_nat_surveys_dev"
 
 
-def compute_centroid_from_boundaries(row):
-    if (isinstance(row["centroid"], str) and not row["centroid"]) or (
-        isinstance(row["centroid"], float) and math.isnan(row["centroid"])
-    ):
-        polygon = shapely.from_wkt(row["boundaries"])
-        row["centroid"] = shapely.centroid(polygon).wkt
-        return row
-    else:
-        if re.search(r"\s*-?\d+.\d*\s*,\s*-?\d+.\d*\s*", str(row["centroid"])):
-            lat = row["centroid"].split(",")[0].strip()
-            lon = row["centroid"].split(",")[1].strip()
-            row["centroid"] = f"POINT({lon} {lat})"
-            return row
-        elif str(row["centroid"]).upper().startswith("POINT"):
-            return row
-        else:
-            raise ValueError(
-                f"Invalid value for field 'centroid' in row {row.name + 6}. "
-                f"Please either provide a position given by comma-separated "
-                f"lat and lon values (e.g. 36.578, 120.356), or provide the "
-                f"position as WKT (e.g. POINT(120.356 36.578)), or leave the "
-                f"field empty, so the centroid is computed from the boundaries.\n"
-                f"No sites not targets have been ingested."
-            )
-
-
 class Ingester:
     def __init__(
         self,
@@ -137,6 +111,7 @@ class Ingester:
                 "Active from  (YYYY-MM-DD)": str,
                 "Active from (YYYY-MM-DD)": str,
                 'Active until (YYYY-MM-DD or " - ")': str,
+                'Active until (YYYY-MM-DD or "-")': str,
                 "Planned maintenance schedule": lambda x: (
                     "Nothing" if x == "N/A" else x
                 ),
@@ -171,6 +146,7 @@ class Ingester:
         )
 
         sites_df = sites_df[sites_df["Unique Site ID"] != "-"]
+        sites_df = sites_df[sites_df["Unique Site ID"].notna()]
         sites_df = sites_df.drop("Unique Site ID", axis=1)
 
         self.validate_sites(sites_df)
@@ -181,7 +157,7 @@ class Ingester:
         sites_df = sites_df.replace(to_replace=np.nan, value="")
         sites_df = sites_df.replace(to_replace="-", value=None)
 
-        sites_df = sites_df.apply(compute_centroid_from_boundaries, axis=1)
+        sites_df = sites_df.apply(self.compute_centroid_from_boundaries, axis=1)
 
         sites_df.insert(len(sites_df.columns), "endorsement", "review")
         sites_df.insert(len(sites_df.columns), "geometry", "POINT(0 0)")
@@ -221,31 +197,41 @@ class Ingester:
         for row in sites_df.iterrows():
             for col in mandatory_fields:
                 if str(row[1][col]) == "nan":
-                    raise ValueError(
+                    message = (
                         f"Row {row[0] + 6}: missing entry for mandatory field "
                         f"'{col}' in sheet 'site'. Please fill in all mandatory fields,"
-                        f" or remove the entire row. No site has been ingested into "
-                        f"the database."
+                        f" or remove the entire row."
                     )
+                    if self.validation_mode:
+                        print(message)
+                    else:
+                        raise ValueError(message)
             try:
                 dateutil.parser.parse(row[1]["active_from"])
             except dateutil.parser.ParserError:
-                raise ValueError(
+                message = (
                     f"Row {row[0] + 6}: invalid entry for field 'active_from'.  in "
                     f"sheet 'site'. Please provide a date or date and time expressed "
-                    f"in YYYY-MM-dd format (UTC). No site has been ingested into the database."
+                    f"in YYYY-MM-dd format (UTC)."
                 )
+                if self.validation_mode:
+                    print(message)
+                else:
+                    raise ValueError(message)
             try:
                 active_until = row[1]["active_until"]
                 if active_until != "-":
                     dateutil.parser.parse(active_until)
             except dateutil.parser.ParserError:
-                raise ValueError(
+                message = (
                     f"Row {row[0] + 6}: invalid entry for field 'active_until'. in "
                     f"sheet 'site'. Please provide a date or date and time expressed "
                     f"in YYYY-MM-dd format (UTC), or provide '-'. "
-                    f"No site has been ingested into the database."
                 )
+                if self.validation_mode:
+                    print(message)
+                else:
+                    raise ValueError(message)
 
     def ingest_targets(self, calibration_site_xls: str) -> str:
         nat_targets_df = None
@@ -328,12 +314,13 @@ class Ingester:
         for row in nat_targets_df.iterrows():
             for col in mandatory_fields:
                 if str(row[1][col]) == "nan":
-                    raise ValueError(
-                        f"Row {row[0] + 6}: missing entry for mandatory field "
-                        f"'{col}' in 'dt' sheet. Please fill in all mandatory fields, "
-                        f"or remove the entire row. No targets have been ingested into "
-                        f"the database."
-                    )
+                    message = f"Row {row[0] + 6}: missing entry for mandatory field "
+                    f"'{col}' in 'dt' sheet. Please fill in all mandatory fields, "
+                    f"or remove the entire row."
+                    if self.validation_mode:
+                        print(message)
+                    else:
+                        raise ValueError(message)
 
     def ingest_art_targets(self, targets_df: pd.DataFrame):
         targets_df.rename(
@@ -419,114 +406,138 @@ class Ingester:
         for row in art_targets_df.iterrows():
             for col in mandatory_fields:
                 if str(row[1][col]) == "nan":
-                    raise ValueError(
-                        f"Row {row[0] + 6}: missing entry for mandatory field "
-                        f"'{col}' in 'cr' sheet. Please fill in all mandatory fields, "
-                        f"or remove the entire row. No targets have been ingested into "
-                        f"the database."
-                    )
+                    message = f"Row {row[0] + 6}: missing entry for mandatory field "
+                    f"'{col}' in 'cr' sheet. Please fill in all mandatory fields, "
+                    f"or remove the entire row."
+                    if self.validation_mode:
+                        print(message)
+                    else:
+                        raise ValueError(message)
             try:
                 float(row[1]["apprx_latitude"])
             except ValueError:
-                raise ValueError(
-                    f"Row {row[0] + 6}: invalid entry for mandatory field "
-                    f"'Approximate Latitude' in 'cr' sheet. Please enter a valid "
-                    f"floating point number. No targets have been ingested into the "
-                    f"database."
-                )
+                message = f"Row {row[0] + 6}: invalid entry for mandatory field "
+                f"'Approximate Latitude' in 'cr' sheet. Please enter a valid "
+                f"floating point number."
+                if self.validation_mode:
+                    print(message)
+                else:
+                    raise ValueError(message)
             if row[1]["apprx_latitude"] < -90 or row[1]["apprx_latitude"] > 90:
-                raise ValueError(
-                    f"Row {row[0] + 6}: invalid entry for mandatory field "
-                    f"'Approximate Latitude' in 'cr' sheet. Please enter a valid "
-                    f"floating point number > -90 and < 90. "
-                    f"No targets have been ingested into the database."
-                )
+                message = f"Row {row[0] + 6}: invalid entry for mandatory field "
+                f"'Approximate Latitude' in 'cr' sheet. Please enter a valid "
+                f"floating point number > -90 and < 90. "
+                if self.validation_mode:
+                    print(message)
+                else:
+                    raise ValueError(message)
             try:
                 float(row[1]["apprx_longitude"])
             except ValueError:
-                raise ValueError(
-                    f"Row {row[0] + 6}: invalid entry for mandatory field "
-                    f"'Approximate Longitude' in 'cr' sheet. Please enter a valid "
-                    f"floating point number. No targets have been ingested into the "
-                    f"database."
-                )
+                message = f"Row {row[0] + 6}: invalid entry for mandatory field "
+                f"'Approximate Longitude' in 'cr' sheet. Please enter a valid "
+                f"floating point number."
+                if self.validation_mode:
+                    print(message)
+                else:
+                    raise ValueError(message)
             if row[1]["apprx_longitude"] < -180 or row[1]["apprx_longitude"] > 180:
-                raise ValueError(
-                    f"Row {row[0] + 6}: invalid entry for mandatory field "
-                    f"'Approximate Longitude' in 'cr' sheet. Please enter a valid "
-                    f"floating point number > -180 and < 180. "
-                    f"No targets have been ingested into the database."
-                )
+                message = f"Row {row[0] + 6}: invalid entry for mandatory field "
+                f"'Approximate Longitude' in 'cr' sheet. Please enter a valid "
+                f"floating point number > -180 and < 180."
+                if self.validation_mode:
+                    print(message)
+                else:
+                    raise ValueError(message)
             try:
                 float(row[1]["apprx_elevation"])
             except ValueError:
-                raise ValueError(
-                    f"Row {row[0] + 6}: invalid entry for mandatory field "
-                    f"'Approximate Elevation' in 'cr' sheet. Please enter a valid "
-                    f"floating point number. No targets have been ingested into the "
-                    f"database."
-                )
+                message = f"Row {row[0] + 6}: invalid entry for mandatory field "
+                f"'Approximate Elevation' in 'cr' sheet. Please enter a valid "
+                f"floating point number."
+                if self.validation_mode:
+                    print(message)
+                else:
+                    raise ValueError(message)
             try:
                 float(row[1]["side_length"])
                 if row[1]["side_length"] <= 0:
                     raise ValueError
             except ValueError:
-                raise ValueError(
+                message = (
                     f"Row {row[0] + 6}: invalid entry for mandatory field "
                     f"'Side Length' in 'cr' sheet. Please enter a valid "
-                    f"floating point number > 0. No targets have been ingested into the "
-                    f"database."
+                    f"floating point number > 0."
                 )
+                if self.validation_mode:
+                    print(message)
+                else:
+                    raise ValueError(message)
             try:
                 if row[1]["rcs"]:
                     float(row[1]["rcs"])
             except ValueError:
-                raise ValueError(
+                message = (
                     f"Row {row[0] + 6}: invalid entry for field "
                     f"'RCS' in 'cr' sheet. Please enter a valid "
-                    f"floating point number. No targets have been ingested into the "
-                    f"database."
+                    f"floating point number."
                 )
+                if self.validation_mode:
+                    print(message)
+                else:
+                    raise ValueError(message)
             try:
                 if row[1]["rcs_accuracy"]:
                     float(row[1]["rcs_accuracy"])
             except ValueError:
-                raise ValueError(
+                message = (
                     f"Row {row[0] + 6}: invalid entry for field "
                     f"'Reference RCS measurement expected accuracy (dB)' in 'cr' "
-                    f"sheet. Please enter a valid floating point number. No target "
-                    f"has been ingested into the database."
+                    f"sheet. Please enter a valid floating point number."
                 )
+                if self.validation_mode:
+                    print(message)
+                else:
+                    raise ValueError(message)
             try:
                 if row[1]["rcs_angle"]:
                     float(row[1]["rcs_angle"])
             except ValueError:
-                raise ValueError(
+                message = (
                     f"Row {row[0] + 6}: invalid entry for field "
                     f"'Reference RCS measurement boresite angle (decimal deg)' in 'cr' "
-                    f"sheet. Please enter a valid floating point number. No target "
-                    f"has been ingested into the database."
+                    f"sheet. Please enter a valid floating point number."
                 )
+                if self.validation_mode:
+                    print(message)
+                else:
+                    raise ValueError(message)
             try:
                 if row[1]["rcs_wavelength"] and row[1]["rcs_wavelength"] <= 0:
                     raise ValueError
             except ValueError:
-                raise ValueError(
+                message = (
                     f"Row {row[0] + 6}: invalid entry for field "
                     f"'Reference RCS measurement wavelength (m)' in 'cr' "
-                    f"sheet. Please enter a valid floating point number > 0. No target "
-                    f"has been ingested into the database."
+                    f"sheet. Please enter a valid floating point number > 0."
                 )
+                if self.validation_mode:
+                    print(message)
+                else:
+                    raise ValueError(message)
             try:
                 if row[1]["rcs_bandwidth"] and row[1]["rcs_bandwidth"] <= 0:
                     raise ValueError
             except ValueError:
-                raise ValueError(
+                message = (
                     f"Row {row[0] + 6}: invalid entry for field "
                     f"'Reference RCS measurement bandwidth (Hz)' in 'cr' "
-                    f"sheet. Please enter a valid floating point number > 0. No target "
-                    f"has been ingested into the database."
+                    f"sheet. Please enter a valid floating point number > 0."
                 )
+                if self.validation_mode:
+                    print(message)
+                else:
+                    raise ValueError(message)
 
     def create_surveys_collection(self):
         properties = {
@@ -758,31 +769,40 @@ class Ingester:
         for row in surveys_df.iterrows():
             for col in mandatory_fields:
                 if str(row[1][col]) == "nan":
-                    raise ValueError(
+                    message = (
                         f"Row {row[0] + 6}: missing entry for mandatory field "
                         f"'{col}' in 'surveys' sheet. Please fill in all mandatory "
-                        f"fields, or remove the entire row. No surveys have been "
-                        f"ingested into the database."
+                        f"fields, or remove the entire row."
                     )
+                    if self.validation_mode:
+                        print(message)
+                    else:
+                        raise ValueError(message)
             try:
                 dateutil.parser.parse(row[1]["survey_start"])
             except dateutil.parser.ParserError:
-                raise ValueError(
+                message = (
                     f"Row {row[0] + 6}: invalid entry '{row[1]['survey_start']}' for mandatory field "
                     f"'Survey start (YYYY-MM-DD)' in 'surveys' sheet. Please enter a "
-                    f"valid date. "
-                    f"No surveys have been ingested into the database."
+                    f"valid date."
                 )
+                if self.validation_mode:
+                    print(message)
+                else:
+                    raise ValueError(message)
             try:
                 if row[1]["survey_stop"] != "-":
                     dateutil.parser.parse(row[1]["survey_stop"])
             except dateutil.parser.ParserError:
-                raise ValueError(
+                message = (
                     f"Row {row[0] + 6}: invalid entry '{row[1]['survey_stop']}' for mandatory field "
                     f"'Stop Monitoring Period (YYYY-MM-DD or \"-\")' in 'surveys' sheet. Please enter a "
                     f"valid date. "
-                    f"No surveys have been ingested into the database."
                 )
+                if self.validation_mode:
+                    print(message)
+                else:
+                    raise ValueError(message)
 
     def validate_art_surveys(self, surveys_df):
         mandatory_fields = [
@@ -804,52 +824,70 @@ class Ingester:
         for row in surveys_df.iterrows():
             for col in mandatory_fields:
                 if str(row[1][col]) == "nan":
-                    raise ValueError(
+                    message = (
                         f"Row {row[0] + 6}: missing entry for mandatory field "
                         f"'{col}' in 'surveys' sheet. Please fill in all mandatory "
-                        f"fields, or remove the entire row. No surveys have been "
-                        f"ingested into the database."
+                        f"fields, or remove the entire row."
                     )
+                    if self.validation_mode:
+                        print(message)
+                    else:
+                        raise ValueError(message)
             try:
                 dateutil.parser.parse(row[1]["survey_date"])
             except dateutil.parser.ParserError:
-                raise ValueError(
+                message = (
                     f"Row {row[0] + 6}: invalid entry '{row[1]['survey_date']}' for mandatory field "
                     f"'Survey date (YYYY-MM-DD)' in 'surveys' sheet. Please enter a "
-                    f"valid date. "
-                    f"No surveys have been ingested into the database."
+                    f"valid date."
                 )
+                if self.validation_mode:
+                    print(message)
+                else:
+                    raise ValueError(message)
             if row[1]["lat"] < -90 or row[1]["lat"] > 90:
-                raise ValueError(
+                message = (
                     f"Row {row[0] + 6}: invalid entry '{row[1]['lat']}' for mandatory field "
                     f"'Latitude (decimal deg)' in 'surveys' sheet. Please enter a "
-                    f"valid floating point number > -90 and < 90. "
-                    f"No surveys have been ingested into the database."
+                    f"valid floating point number > -90 and < 90."
                 )
+                if self.validation_mode:
+                    print(message)
+                else:
+                    raise ValueError(message)
             if row[1]["lon"] < -180 or row[1]["lon"] > 180:
-                raise ValueError(
+                message = (
                     f"Row {row[0] + 6}: invalid entry '{row[1]['lon']}' for mandatory field "
                     f"'Longitude (decimal deg)' in 'surveys' sheet. Please enter a "
-                    f"valid floating point number > -180 and < 180. "
-                    f"No surveys have been ingested into the database."
+                    f"valid floating point number > -180 and < 180."
                 )
+                if self.validation_mode:
+                    print(message)
+                else:
+                    raise ValueError(message)
             if row[1]["position_accuracy"] <= 0:
-                raise ValueError(
+                message = (
                     f"Row {row[0] + 6}: invalid entry '{row[1]['position_accuracy']}' "
                     f"for mandatory field 'Position accuracy (cm)' in 'surveys' sheet. Please enter a "
-                    f"valid floating point number > 0. "
-                    f"No surveys have been ingested into the database."
+                    f"valid floating point number > 0."
                 )
+                if self.validation_mode:
+                    print(message)
+                else:
+                    raise ValueError(message)
             crs = row[1]["coordinate_reference_system"]
             try:
                 pyproj.CRS.from_user_input(crs)
             except pyproj.exceptions.CRSError:
-                raise ValueError(
+                message = (
                     f"Row {row[0] + 6}: invalid entry '{crs}' for mandatory field "
                     f"'Coordinate Reference System (WKT or EPSG)' in 'surveys' sheet. "
-                    f"Please enter a valid WKT or EPSG (e.g. EPSG:4326). "
-                    f"No surveys have been ingested into the database."
+                    f"Please enter a valid WKT or EPSG (e.g. EPSG:4326)."
                 )
+                if self.validation_mode:
+                    print(message)
+                else:
+                    raise ValueError(message)
 
     def upload_file(
         self,
@@ -935,6 +973,34 @@ class Ingester:
                 {"form_url": form_url},
                 f"short_site_identifier=eq.{site_id}",
             )
+
+    def compute_centroid_from_boundaries(self, row):
+        if (isinstance(row["centroid"], str) and not row["centroid"]) or (
+            isinstance(row["centroid"], float) and math.isnan(row["centroid"])
+        ):
+            polygon = shapely.from_wkt(row["boundaries"])
+            row["centroid"] = shapely.centroid(polygon).wkt
+            return row
+        else:
+            if re.search(r"\s*-?\d+.\d*\s*,\s*-?\d+.\d*\s*", str(row["centroid"])):
+                lat = row["centroid"].split(",")[0].strip()
+                lon = row["centroid"].split(",")[1].strip()
+                row["centroid"] = f"POINT({lon} {lat})"
+                return row
+            elif str(row["centroid"]).upper().startswith("POINT"):
+                return row
+            else:
+                message = (
+                    f"Invalid value for field 'centroid' in row {row.name + 6}. "
+                    f"Please either provide a position given by comma-separated "
+                    f"lat and lon values (e.g. 36.578, 120.356), or provide the "
+                    f"position as WKT (e.g. POINT(120.356 36.578)), or leave the "
+                    f"field empty, so the centroid is computed from the boundaries."
+                )
+                if self.validation_mode:
+                    print(message)
+                else:
+                    raise ValueError(message)
 
 
 @click.command()
