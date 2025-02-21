@@ -1,3 +1,4 @@
+import datetime
 import math
 import os
 import string
@@ -679,8 +680,10 @@ class Ingester:
         )
 
         surveys_df = surveys_df[surveys_df["unique_target_id"] != ""]
+        surveys_df = surveys_df[surveys_df.unique_target_id.notnull()]
         surveys_df = surveys_df.replace(math.nan, None)
         surveys_df["elevation"] = surveys_df["elevation"].astype(float)
+        surveys_df = surveys_df.dropna(axis=0, how="all")
 
         self.validate_art_surveys(surveys_df)
         if self.validation_mode:
@@ -842,7 +845,7 @@ class Ingester:
                         raise ValueError(message)
             try:
                 dateutil.parser.parse(row[1]["survey_date"])
-            except dateutil.parser.ParserError:
+            except (dateutil.parser.ParserError, TypeError):
                 message = (
                     f"surveys, row {row[0] + 6}: invalid entry "
                     f"'{row[1]['survey_date']}' for mandatory field "
@@ -924,12 +927,17 @@ class Ingester:
 
     def validate_duration(self, row):
         try:
-            dateutil.parser.parse(row[1]["duration"])
-        except dateutil.parser.ParserError:
+            duration_parts = row[1]["duration"].split(":")
+            if len(duration_parts) != 3:
+                raise ValueError
+            int(duration_parts[0])
+            int(duration_parts[1])
+            int(duration_parts[2])
+        except ValueError:
             message = (
                 f"surveys, row {row[0] + 6}: invalid entry for field "
                 f"'GNSS measurement duration (hh:mm:ss)'."
-                f"Please provide a time expressed "
+                f" Please provide a time expressed "
                 f"in hh:mm:ss format."
             )
             if self.validation_mode:
