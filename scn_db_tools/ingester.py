@@ -1,4 +1,3 @@
-import datetime
 import math
 import os
 import string
@@ -39,15 +38,10 @@ class Ingester:
         server_port: int,
         client_id: str,
         client_secret: str,
-        auth_audience: str,
+        auth_domain: str,
         admin_password: str,
         filebird_token: str,
     ):
-        self.server_url = server_url
-        self.server_port = server_port
-        self.client_id = client_id
-        self.client_secret = client_secret
-        self.auth_audience = auth_audience
         self.admin_password = admin_password
         self.filebird_token = filebird_token
 
@@ -69,7 +63,7 @@ class Ingester:
                 server_port=server_port,
                 client_id=client_id,
                 client_secret=client_secret,
-                auth_aud=auth_audience,
+                auth_domain=auth_domain,
             )
 
     def create_collection(self):
@@ -237,6 +231,7 @@ class Ingester:
     def ingest_targets(self, calibration_site_xls: str) -> str:
         nat_targets_df = None
         art_targets_df = None
+        art_targets_unavailability = None
         try:
             nat_targets_df = pd.read_excel(
                 calibration_site_xls,
@@ -251,12 +246,27 @@ class Ingester:
             art_targets_df = pd.read_excel(
                 calibration_site_xls, "cr", skiprows=range(1, 5)
             )
+            try:
+                art_targets_unavailability = pd.read_excel(
+                    calibration_site_xls,
+                    "unavailability (optional)",
+                    skiprows=range(1, 5),
+                    converters={
+                        "Start of Unavailability (YYYY-MM-DD)": str,
+                        "End of Unavailability (YYYY-MM-DD)": str,
+                    },
+                )
+            except ValueError as exc:
+                if str(exc) == "Worksheet named 'unavailability (optional)' not found":
+                    art_targets_unavailability = None
+                else:
+                    raise exc
 
         if nat_targets_df is not None:
             self.ingest_nat_targets(nat_targets_df)
             return "natural"
         elif art_targets_df is not None:
-            self.ingest_art_targets(art_targets_df)
+            self.ingest_art_targets(art_targets_df, art_targets_unavailability)
             return "artificial"
         else:
             print("Could neither read dt nor cr. No targets ingested.")
@@ -326,7 +336,9 @@ class Ingester:
                     else:
                         raise ValueError(message)
 
-    def ingest_art_targets(self, targets_df: pd.DataFrame):
+    def ingest_art_targets(
+        self, targets_df: pd.DataFrame, unavailability: Optional[DataFrame]
+    ) -> None:
         targets_df.rename(
             columns={
                 "Unique Target ID": "unique_target_id",
@@ -374,6 +386,23 @@ class Ingester:
         print("Targets validation successful.")
 
         self.upload_photos(targets_df)
+
+        if unavailability is not None:
+            unavailability.rename(
+                columns={
+                    "Unique Target ID": "unique_target_id",
+                    "Start of Unavailability (YYYY-MM-DD)": "unavailability_start",
+                    "End of Unavailability (YYYY-MM-DD)": "unavailability_end",
+                },
+                inplace=True,
+                errors="ignore",
+            )
+            unavailability = unavailability.drop("Unique Site ID", axis=1)
+            unavailability = unavailability.drop("Internal ID", axis=1)
+            unavailability = unavailability.groupby(
+                "unique_target_id", as_index=False
+            ).agg({"unavailability_start": list, "unavailability_end": list})
+            targets_df = targets_df.merge(unavailability, on="unique_target_id")
 
         gdf = gpd.GeoDataFrame(
             targets_df,
@@ -1033,6 +1062,7 @@ class Ingester:
         media_type: str,
         target_name: Optional[str] = None,
     ) -> Optional[str]:
+
         if self.validation_mode:
             return None
 
@@ -1109,6 +1139,7 @@ class Ingester:
                 SITES_COLLECTION,
                 {"form_url": form_url},
                 f"short_site_identifier=eq.{site_id}",
+                database=DATABASE,
             )
 
     def compute_centroid_from_boundaries(self, row):
@@ -1157,9 +1188,9 @@ class Ingester:
     help="The REST API Key of the Wordpress FileBird plugin.",
 )
 @click.option(
-    "--auth_audience",
-    default="https://xcube-users.brockmann-consult.de/api/v2",
-    help="The geoDB auth audience URL.",
+    "--auth_domain",
+    default="https://winchester.production.brockmann-consult.de/winchester",
+    help="The geoDB auth domain URL.",
 )
 @click.option(
     "--proj_dir",
@@ -1185,7 +1216,7 @@ def ingest_calibration_info(
     admin_password: str,
     filebird_token: str,
     proj_dir: str,
-    auth_audience: str,
+    auth_domain: str,
     license_file: str,
 ):
     """
@@ -1218,7 +1249,7 @@ def ingest_calibration_info(
         server_port,
         client_id,
         client_secret,
-        auth_audience,
+        auth_domain,
         admin_password,
         filebird_token,
     )

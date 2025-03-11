@@ -12,4 +12,4 @@ dependencies:
   - python-dateutil
   - requests
   - shapely
-  - xcube_geodb
+  - xcube_geodb >= 1.0.9
