@@ -34,12 +34,18 @@ from scn_db_tools.ingester import Ingester
     help="The geoDB server URL.",
 )
 @click.option("--server_port", default=443, help="The geoDB server port.")
-@click.option("--client_id", required=False, help="The geoDB client_id.")
-@click.option("--client_secret", required=False, help="The geoDB client_secret.")
+@click.option("--client_id", required=True, help="The geoDB client_id.")
+@click.option("--client_secret", required=True, help="The geoDB client_secret.")
 @click.option(
     "--auth_domain",
     default="https://winchester.production.brockmann-consult.de/winchester",
     help="The geoDB auth domain URL.",
+)
+@click.option("--admin_password", required=False, help="The WordPress admin password.")
+@click.option(
+    "--filebird_token",
+    required=True,
+    help="The REST API Key of the Wordpress FileBird plugin.",
 )
 @click.argument(
     "unavailability_xls",
@@ -52,6 +58,8 @@ def ingest_unavailability_info(
     client_id: str,
     client_secret: str,
     auth_domain: str,
+    admin_password: str,
+    filebird_token: str,
 ):
     """
     Ingests the unavailability dates given in UNAVAILABILITY_FILE into the database.
@@ -65,6 +73,8 @@ def ingest_unavailability_info(
         client_id,
         client_secret,
         auth_domain,
+        admin_password,
+        filebird_token,
     )
 
     ingester.ingest_unavailabilities(unavailability_xls)

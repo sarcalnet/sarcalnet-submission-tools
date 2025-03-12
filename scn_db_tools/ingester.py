@@ -1090,7 +1090,7 @@ class Ingester:
 
         if move_response.status_code >= 300:
             raise ValueError(
-                "Unable to move {type} file to correct folder, reason: "
+                f"Unable to move {media_type} file to correct folder, reason: "
                 + str(move_response.content)
             )
 
@@ -1187,29 +1187,50 @@ class Ingester:
             "unique_target_id", as_index=False
         ).agg({"unavailability_start": list, "unavailability_end": list})
 
+        form_url = self.upload_unavailability_xls(unavailability_xls)
+
         for index, row in unavailabilities.iterrows():
             unique_target_id = row["unique_target_id"]
             previous_values = self.geoDB.get_collection(
                 TARGETS_COLLECTION,
                 query=f"select=unavailability_start,"
-                f"unavailability_end&unique_target_id=eq.{unique_target_id}",
+                f"unavailability_end,unavailability_forms&unique_target_id=eq.{unique_target_id}",
                 database=DATABASE,
             )
             new_unavailability_start = (
-                previous_values["unavailability_start"][0]
-                + unavailabilities["unavailability_start"][0]
+                (
+                    previous_values["unavailability_start"][0]
+                    + unavailabilities["unavailability_start"][0]
+                )
+                if previous_values["unavailability_start"][0]
+                else unavailabilities["unavailability_start"][0]
             )
             new_unavailability_end = (
-                previous_values["unavailability_end"][0]
-                + unavailabilities["unavailability_end"][0]
+                (
+                    previous_values["unavailability_end"][0]
+                    + unavailabilities["unavailability_end"][0]
+                )
+                if previous_values["unavailability_end"][0]
+                else unavailabilities["unavailability_end"][0]
+            )
+            new_unavailability_forms = (
+                [form_url]
+                if previous_values["unavailability_forms"][0] is None
+                else previous_values["unavailability_forms"][0] + [form_url]
             )
             self.geoDB.update_collection(
                 TARGETS_COLLECTION,
                 values={
                     "unavailability_start": new_unavailability_start,
                     "unavailability_end": new_unavailability_end,
+                    "unavailability_forms": new_unavailability_forms,
                 },
                 query=f"unique_target_id=eq.{unique_target_id}",
                 database=DATABASE,
             )
             print(f"Updated unavailability periods for target {unique_target_id}")
+
+    def upload_unavailability_xls(self, xls: str) -> str:
+        folder_id = self.get_folder_id("submission_forms")
+        target_name = os.path.basename(xls)
+        return self.upload_file(xls, folder_id, "unavailability form", target_name)
