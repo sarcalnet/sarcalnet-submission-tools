@@ -3,7 +3,7 @@ import os
 import string
 import urllib
 import random
-from typing import Optional, List
+from typing import Optional, List, Tuple
 
 import dateutil.parser
 import re
@@ -14,6 +14,7 @@ import geopandas as gpd
 import pyproj
 import requests
 import shapely
+from geopandas import GeoDataFrame
 
 from pandas import DataFrame
 from requests.auth import HTTPBasicAuth
@@ -88,9 +89,7 @@ class Ingester:
                 SITES_COLLECTION, properties, database=DATABASE
             )
 
-    def ingest_sites(
-        self, calibration_site_xls: str, license_url: Optional[str] = None
-    ) -> List[str]:
+    def create_site_gdf(self, calibration_site_xls: str) -> Optional[GeoDataFrame]:
         sites_df = pd.read_excel(
             calibration_site_xls,
             "site",
@@ -139,7 +138,7 @@ class Ingester:
 
         self.validate_sites(sites_df)
         if self.validation_mode:
-            return []
+            return None
         print("Sites validation successful.")
 
         sites_df = sites_df.replace(to_replace=np.nan, value="")
@@ -149,10 +148,43 @@ class Ingester:
 
         sites_df.insert(len(sites_df.columns), "endorsement", "review")
         sites_df.insert(len(sites_df.columns), "geometry", "POINT(0 0)")
-        sites_df.insert(len(sites_df.columns), "license_url", license_url)
         sites_df["geometry"] = gpd.GeoSeries.from_wkt(sites_df["boundaries"])
+        return gpd.GeoDataFrame(sites_df, geometry="geometry", crs=4326)
 
-        gdf = gpd.GeoDataFrame(sites_df, geometry="geometry", crs=4326)
+    def update_sites(self, calibration_site_xls: str):
+        gdf = self.create_site_gdf(calibration_site_xls)
+        existing_sites = self.geoDB.get_collection(
+            SITES_COLLECTION,
+            "select=short_site_identifier,primary_target_type_identifier",
+            database=DATABASE,
+        )
+        existing_site_ids = [
+            a[:7]
+            for a in list(
+                existing_sites["short_site_identifier"]
+                + "-"
+                + existing_sites["primary_target_type_identifier"]
+            )
+        ]
+        for site_id in existing_site_ids:
+            gdf = gdf[
+                (gdf["short_site_identifier"] == site_id[:4])
+                & (gdf["primary_target_type_identifier"] == site_id[4:])
+            ]
+        return self.do_site_ingestion(gdf)
+
+    def ingest_sites(
+        self, calibration_site_xls: str, license_url: Optional[str] = None
+    ) -> List[str]:
+
+        gdf = self.create_site_gdf(calibration_site_xls)
+        if gdf is None:
+            return []
+
+        gdf.insert(len(gdf.columns), "license_url", license_url)
+        return self.do_site_ingestion(gdf)
+
+    def do_site_ingestion(self, gdf):
         if len(gdf) > 0:
             self.geoDB.insert_into_collection(
                 SITES_COLLECTION, gdf, database=DATABASE, crs=4326
@@ -161,7 +193,6 @@ class Ingester:
             return list(gdf["short_site_identifier"])
         else:
             print("No new sites ingested.")
-
         return []
 
     def validate_sites(self, sites_df):
@@ -221,7 +252,56 @@ class Ingester:
                 else:
                     raise ValueError(message)
 
-    def ingest_targets(self, calibration_site_xls: str) -> str:
+    def update_targets(self, calibration_site_xls: str) -> Tuple[str, List[str]]:
+        targets = self.read_targets(calibration_site_xls)
+        existing_targets = self.geoDB.get_collection(
+            TARGETS_COLLECTION,
+            "select=unique_target_id",
+            database=DATABASE,
+        )
+        existing_target_ids = list(existing_targets["unique_target_id"])
+
+        nat_targets_df = targets[0]
+        art_targets_df = targets[1]
+        art_targets_unavailability = targets[2]
+        for target_id in existing_target_ids:
+            if nat_targets_df is not None:
+                nat_targets_df = nat_targets_df[
+                    nat_targets_df["Unique Target ID"] != target_id
+                ]
+            if art_targets_df is not None:
+                art_targets_df = art_targets_df[
+                    art_targets_df["Unique Target ID"] != target_id
+                ]
+            if art_targets_unavailability is not None:
+                art_targets_unavailability = art_targets_unavailability[
+                    art_targets_unavailability["Unique Target ID"] != target_id
+                ]
+
+        updated_site_ids = []
+        updated_site_ids += (
+            list(nat_targets_df["Short Site ID"].dropna())
+            if nat_targets_df is not None
+            and nat_targets_df["Short Site ID"].dropna() is not None
+            else []
+        )
+        updated_site_ids += (
+            list(art_targets_df["Short Site ID"].dropna())
+            if art_targets_df is not None
+            and art_targets_df["Short Site ID"].dropna() is not None
+            else []
+        )
+
+        return (
+            self.do_targets_ingestion(
+                (nat_targets_df, art_targets_df, art_targets_unavailability)
+            ),
+            updated_site_ids,
+        )
+
+    def read_targets(
+        self, calibration_site_xls: str
+    ) -> tuple[Optional[DataFrame], Optional[DataFrame], Optional[DataFrame]]:
         nat_targets_df = None
         art_targets_df = None
         art_targets_unavailability = None
@@ -254,7 +334,16 @@ class Ingester:
                     art_targets_unavailability = None
                 else:
                     raise exc
+        return nat_targets_df, art_targets_df, art_targets_unavailability
 
+    def ingest_targets(self, calibration_site_xls: str) -> str:
+        targets = self.read_targets(calibration_site_xls)
+        return self.do_targets_ingestion(targets)
+
+    def do_targets_ingestion(self, targets):
+        nat_targets_df = targets[0]
+        art_targets_df = targets[1]
+        art_targets_unavailability = targets[2]
         if nat_targets_df is not None:
             self.ingest_nat_targets(nat_targets_df)
             return "natural"
@@ -603,7 +692,61 @@ class Ingester:
         else:
             print("No surveys ingested.")
 
-    def ingest_nat_surveys(self, calibration_site_xls: str):
+    def update_surveys(self, calibration_site_xls: str, target_type: str):
+        if target_type == "natural":
+            self.update_nat_surveys(calibration_site_xls)
+        elif target_type == "artificial":
+            self.update_art_surveys(calibration_site_xls)
+        else:
+            print(f"Invalid target type {target_type}. No surveys ingested.")
+
+    def update_nat_surveys(self, calibration_site_xls: str):
+        surveys_df = self.read_nat_surveys(calibration_site_xls)
+        if surveys_df is None:
+            return
+        existing_surveys = self.geoDB.get_collection(
+            NAT_SURVEYS_COLLECTION,
+            "select=unique_target_id,survey_date",
+            database=DATABASE,
+        )
+        existing_survey_ids = []
+        dates = list(existing_surveys["survey_date"])
+        for i, target_id in enumerate(list(existing_surveys["unique_target_id"])):
+            existing_survey_ids.append(target_id + "_" + dates[i])
+        print(existing_survey_ids)
+
+    def update_art_surveys(self, calibration_site_xls: str):
+        surveys_df = self.read_art_surveys(calibration_site_xls)
+        if surveys_df is None:
+            return
+        existing_surveys = self.geoDB.get_collection(
+            SURVEYS_COLLECTION,
+            "select=unique_target_id,survey_date",
+            database=DATABASE,
+        )
+        existing_survey_ids = []
+        dates = list(existing_surveys["survey_date"])
+        for i, target_id in enumerate(list(existing_surveys["unique_target_id"])):
+            existing_survey_ids.append(target_id + "_" + dates[i])
+        print(existing_survey_ids)
+
+    def ingest_nat_surveys(self, calibration_site_xls: str) -> None:
+        surveys_df = self.read_nat_surveys(calibration_site_xls)
+        if surveys_df is None:
+            return
+        surveys_df.insert(len(surveys_df.columns), "geometry", "POINT(0 0)")
+        surveys_df["geometry"] = gpd.GeoSeries.from_wkt(surveys_df["geometry"])
+        gdf = gpd.GeoDataFrame(surveys_df, geometry="geometry", crs=4326)
+
+        if len(gdf) > 0:
+            self.geoDB.insert_into_collection(
+                NAT_SURVEYS_COLLECTION, gdf, database=DATABASE, crs=4326
+            )
+            print(f"Successfully ingested {len(gdf)} surveys of natural targets.")
+        else:
+            print("No new surveys ingested.")
+
+    def read_nat_surveys(self, calibration_site_xls: str) -> Optional[DataFrame]:
         surveys_df = pd.read_excel(
             calibration_site_xls,
             "survey",
@@ -649,22 +792,25 @@ class Ingester:
         self.validate_nat_surveys(surveys_df)
         print("Successfully validated surveys.")
         if self.validation_mode:
-            return
+            return None
 
-        surveys_df = surveys_df.replace(to_replace="-", value=None)
-        surveys_df.insert(len(surveys_df.columns), "geometry", "POINT(0 0)")
-        surveys_df["geometry"] = gpd.GeoSeries.from_wkt(surveys_df["geometry"])
-        gdf = gpd.GeoDataFrame(surveys_df, geometry="geometry", crs=4326)
+        return surveys_df.replace(to_replace="-", value=None)
+
+    def ingest_art_surveys(self, calibration_site_xls: str):
+        gdf = self.read_art_surveys(calibration_site_xls)
+        if gdf is None:
+            return
+        self.upload_photos(gdf)
 
         if len(gdf) > 0:
             self.geoDB.insert_into_collection(
-                NAT_SURVEYS_COLLECTION, gdf, database=DATABASE, crs=4326
+                SURVEYS_COLLECTION, gdf, database=DATABASE, crs=4326
             )
-            print(f"Successfully ingested {len(gdf)} surveys of natural targets.")
+            print(f"Successfully ingested {len(gdf)} surveys of artificial targets.")
         else:
             print("No new surveys ingested.")
 
-    def ingest_art_surveys(self, calibration_site_xls: str):
+    def read_art_surveys(self, calibration_site_xls: str) -> Optional[GeoDataFrame]:
         surveys_df = pd.read_excel(
             calibration_site_xls,
             "survey",
@@ -709,22 +855,12 @@ class Ingester:
 
         self.validate_art_surveys(surveys_df)
         if self.validation_mode:
-            return
+            return None
         print("Surveys validation successful.")
-
-        self.upload_photos(surveys_df)
 
         surveys_df.insert(len(surveys_df.columns), "geometry", "POINT(0 0)")
         surveys_df["geometry"] = gpd.GeoSeries.from_wkt(surveys_df["geometry"])
-        gdf = gpd.GeoDataFrame(surveys_df, geometry="geometry", crs=4326)
-
-        if len(gdf) > 0:
-            self.geoDB.insert_into_collection(
-                SURVEYS_COLLECTION, gdf, database=DATABASE, crs=4326
-            )
-            print(f"Successfully ingested {len(gdf)} surveys of artificial targets.")
-        else:
-            print("No new surveys ingested.")
+        return gpd.GeoDataFrame(surveys_df, geometry="geometry", crs=4326)
 
     def upload_photos(self, df: DataFrame):
         folder_id = self.get_folder_id("ext_pictures")
@@ -746,6 +882,10 @@ class Ingester:
                         f.write(photo_response.content)
                 else:
                     filename = photo_link
+
+                if not os.path.exists(filename):
+                    print(f"WARN: Photo {filename} does not exist. Skipping.")
+                    continue
 
                 print(f"Uploading {filename}...")
                 with open(filename, mode="rb") as photo_file:
