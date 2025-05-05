@@ -23,11 +23,11 @@ from xcube_geodb.core.geodb import GeoDBClient
 
 DATABASE = "sarcalnet"
 
-SITES_COLLECTION = "calibration_sites_dev"
-TARGETS_COLLECTION = "calibration_targets_dev"
-NAT_TARGETS_COLLECTION = "calibration_nat_targets_dev"
-SURVEYS_COLLECTION = "calibration_surveys_dev"
-NAT_SURVEYS_COLLECTION = "calibration_nat_surveys_dev"
+SITES_COLLECTION = "calibration_sites"
+TARGETS_COLLECTION = "calibration_targets"
+NAT_TARGETS_COLLECTION = "calibration_nat_targets"
+SURVEYS_COLLECTION = "calibration_surveys"
+NAT_SURVEYS_COLLECTION = "calibration_nat_surveys"
 
 
 class Ingester:
@@ -166,11 +166,21 @@ class Ingester:
                 + existing_sites["primary_target_type_identifier"]
             )
         ]
-        for site_id in existing_site_ids:
-            gdf = gdf[
-                (gdf["short_site_identifier"] == site_id[:4])
-                & (gdf["primary_target_type_identifier"] == site_id[4:])
-            ]
+        # only update existing sites, do not create new sites
+        # for site_id in existing_site_ids:
+        #     gdf = gdf[
+        #         (gdf["short_site_identifier"] == site_id[:4])
+        #         & (gdf["primary_target_type_identifier"] == site_id[4:])
+        #     ]
+
+        gdf = gdf[
+            (
+                gdf["short_site_identifier"]
+                + "_"
+                + gdf["primary_target_type_identifier"]
+            ).isin(existing_site_ids)
+        ]
+
         return self.do_site_ingestion(gdf)
 
     def ingest_sites(
@@ -239,13 +249,34 @@ class Ingester:
                     raise ValueError(message)
             try:
                 active_until = row[1]["active_until"]
-                if active_until != "-":
+                if not (active_until == "-" or active_until == "'-'"):
                     dateutil.parser.parse(active_until)
             except dateutil.parser.ParserError:
                 message = (
                     f"site, row {row[0] + 6}: invalid entry for field "
                     f"'active_until'. Please provide a date or date and time expressed "
                     f"in YYYY-MM-dd format (UTC), or provide '-'. "
+                )
+                if self.validation_mode:
+                    print(message)
+                else:
+                    raise ValueError(message)
+            try:
+                website = row[1]["website"]
+                if website and not str(website) == "nan":
+                    if website.startswith("http"):
+                        if requests.get(website).status_code >= 400:
+                            raise requests.exceptions.ConnectionError
+                    else:
+                        if (
+                            requests.get("http://" + website).status_code >= 400
+                            or requests.get("https://" + website).status_code >= 400
+                        ):
+                            raise requests.exceptions.ConnectionError
+            except requests.exceptions.ConnectionError:
+                message = (
+                    f"site, row {row[0] + 6}: invalid entry for field "
+                    f"'website'. Please provide an accessible website."
                 )
                 if self.validation_mode:
                     print(message)
@@ -902,7 +933,8 @@ class Ingester:
                 )
                 df.at[i, "photo_link"] = upload_response.json()["source_url"]
 
-                os.remove(filename)
+                if photo_link.startswith("http"):
+                    os.remove(filename)
                 if upload_response.status_code >= 300:
                     raise ValueError(upload_response.content)
 
@@ -1131,7 +1163,7 @@ class Ingester:
         message = (
             f"surveys, row {row[0] + 6}: invalid entry '{row[1]['boresight_angle']}' "
             f"for mandatory field 'Boresight angle (decimal deg)'. Please enter a "
-            f"valid floating point number >= 0 and <= 90."
+            f"valid floating point number >= -360 and <= 360."
         )
         try:
             float(row[1]["boresight_angle"])
@@ -1141,7 +1173,7 @@ class Ingester:
                 return
             else:
                 raise ValueError(message)
-        if row[1]["boresight_angle"] < 0 or row[1]["boresight_angle"] > 90:
+        if row[1]["boresight_angle"] < -360 or row[1]["boresight_angle"] > 360:
             if self.validation_mode:
                 print(message)
             else:
