@@ -60,35 +60,6 @@ class Ingester:
                 auth_domain=auth_domain,
             )
 
-    def create_collection(self):
-        properties = {
-            "short_site_identifier": "varchar",
-            "sitename": "varchar",
-            "country": "varchar",
-            "province_state_region": "varchar",
-            "primary_target_type_identifier": "varchar",
-            "target_types": "varchar",
-            "primary_sensor": "varchar",
-            "special_requests": "boolean",
-            "responsible_organization": "varchar",
-            "website": "varchar",
-            "active_from": "date",
-            "active_until": "date",
-            "poc_name": "varchar",
-            "poc_mail": "varchar",
-            "poc2_name": "varchar",
-            "poc2_mail": "varchar",
-            "centroid": "varchar",
-            "boundaries": "varchar",
-            "maintenance_schedule": "varchar",
-            "characteristics": "varchar",
-            "endorsement": "varchar",
-        }
-        if not self.geoDB.collection_exists(SITES_COLLECTION, DATABASE):
-            self.geoDB.create_collection(
-                SITES_COLLECTION, properties, database=DATABASE
-            )
-
     def create_site_gdf(self, calibration_site_xls: str) -> Optional[GeoDataFrame]:
         sites_df = pd.read_excel(
             calibration_site_xls,
@@ -107,11 +78,11 @@ class Ingester:
 
         sites_df.rename(
             columns={
-                "Short Site ID": "short_site_identifier",
+                "Short Site ID": "short_site_id",
                 "Country": "country",
-                "Site Name": "sitename",
+                "Site Name": "site_name",
                 "Province / state / region": "province_state_region",
-                "Primary Target Type ID": "primary_target_type_identifier",
+                "Primary Target Type ID": "primary_target_type_id",
                 "Target Types": "target_types",
                 "Primary Sensor": "primary_sensor",
                 "Willing to consider special requests": "special_requests",
@@ -121,13 +92,13 @@ class Ingester:
                 "Active from (YYYY-MM-DD)": "active_from",
                 'Active until (YYYY-MM-DD or "-")': "active_until",
                 "POC Name": "poc_name",
-                "POC email": "poc_mail",
-                "Additional POC Name": "poc2_name",
-                "Additional POC email": "poc2_mail",
+                "POC email": "poc_email",
+                "Additional POC Name": "poc_name2",
+                "Additional POC email": "poc_email2",
                 "Centroid of the site (latitude and longitude in decima deg)": "centroid",
                 "Boundaries": "boundaries",
                 "Planned maintenance schedule": "maintenance_schedule",
-                "Characteristics": "characteristics",
+                "Characteristics": "landcover",
             },
             inplace=True,
         )
@@ -136,16 +107,17 @@ class Ingester:
         sites_df = sites_df[sites_df["Unique Site ID"].notna()]
         sites_df = sites_df.drop("Unique Site ID", axis=1)
 
+        sites_df = sites_df.replace(to_replace=np.nan, value="")
+        columns_to_replace = [col for col in sites_df.columns if col != "active_until"]
+        sites_df[columns_to_replace] = sites_df[columns_to_replace].replace("-", None)
+        sites_df = sites_df.apply(self.compute_centroid_from_boundaries, axis=1)
+
         self.validate_sites(sites_df)
         if self.validation_mode:
             return None
         print("Sites validation successful.")
 
-        sites_df = sites_df.replace(to_replace=np.nan, value="")
-        sites_df = sites_df.replace(to_replace="-", value=None)
-
-        sites_df = sites_df.apply(self.compute_centroid_from_boundaries, axis=1)
-
+        sites_df["active_until"] = sites_df["active_until"].replace("-", None)
         sites_df.insert(len(sites_df.columns), "endorsement", "review")
         sites_df.insert(len(sites_df.columns), "geometry", "POINT(0 0)")
         sites_df["geometry"] = gpd.GeoSeries.from_wkt(sites_df["boundaries"])
@@ -155,30 +127,28 @@ class Ingester:
         gdf = self.create_site_gdf(calibration_site_xls)
         existing_sites = self.geoDB.get_collection(
             SITES_COLLECTION,
-            "select=short_site_identifier,primary_target_type_identifier",
+            "select=short_site_id,primary_target_type_id",
             database=DATABASE,
         )
         existing_site_ids = [
             a[:7]
             for a in list(
-                existing_sites["short_site_identifier"]
+                existing_sites["short_site_id"]
                 + "-"
-                + existing_sites["primary_target_type_identifier"]
+                + existing_sites["primary_target_type_id"]
             )
         ]
         # only update existing sites, do not create new sites
         # for site_id in existing_site_ids:
         #     gdf = gdf[
-        #         (gdf["short_site_identifier"] == site_id[:4])
-        #         & (gdf["primary_target_type_identifier"] == site_id[4:])
+        #         (gdf["short_site_id"] == site_id[:4])
+        #         & (gdf["primary_target_type_id"] == site_id[4:])
         #     ]
 
         gdf = gdf[
-            (
-                gdf["short_site_identifier"]
-                + "_"
-                + gdf["primary_target_type_identifier"]
-            ).isin(existing_site_ids)
+            (gdf["short_site_id"] + "_" + gdf["primary_target_type_id"]).isin(
+                existing_site_ids
+            )
         ]
 
         return self.do_site_ingestion(gdf)
@@ -200,17 +170,17 @@ class Ingester:
                 SITES_COLLECTION, gdf, database=DATABASE, crs=4326
             )
             print(f"Successfully ingested {len(gdf)} sites.")
-            return list(gdf["short_site_identifier"])
+            return list(gdf["short_site_id"])
         else:
             print("No new sites ingested.")
         return []
 
     def validate_sites(self, sites_df):
         mandatory_fields = [
-            "short_site_identifier",
-            "sitename",
+            "short_site_id",
+            "site_name",
             "country",
-            "primary_target_type_identifier",
+            "primary_target_type_id",
             "target_types",
             "primary_sensor",
             "special_requests",
@@ -218,10 +188,10 @@ class Ingester:
             "active_from",
             "active_until",
             "poc_name",
-            "poc_mail",
+            "poc_email",
             "boundaries",
             "maintenance_schedule",
-            "characteristics",
+            "landcover",
         ]
         for row in sites_df.iterrows():
             for col in mandatory_fields:
@@ -235,6 +205,17 @@ class Ingester:
                         print(message)
                     else:
                         raise ValueError(message)
+            try:
+                shapely.from_wkt(row[1]["boundaries"])
+            except shapely.errors.GEOSException as e:
+                message = (
+                    f"site, row {row[0] + 6}: invalid entry for field "
+                    f"'boundaries': {str(e)}."
+                )
+                if self.validation_mode:
+                    print(message)
+                else:
+                    raise ValueError(message)
             try:
                 dateutil.parser.parse(row[1]["active_from"])
             except dateutil.parser.ParserError:
@@ -287,10 +268,10 @@ class Ingester:
         targets = self.read_targets(calibration_site_xls)
         existing_targets = self.geoDB.get_collection(
             TARGETS_COLLECTION,
-            "select=unique_target_id",
+            "select=target_id",
             database=DATABASE,
         )
-        existing_target_ids = list(existing_targets["unique_target_id"])
+        existing_target_ids = list(existing_targets["target_id"])
 
         nat_targets_df = targets[0]
         art_targets_df = targets[1]
@@ -388,13 +369,13 @@ class Ingester:
     def ingest_nat_targets(self, targets_df: pd.DataFrame):
         targets_df.rename(
             columns={
-                "Unique Target ID": "unique_target_id",
-                "Short Site ID": "short_site_identifier",
-                "Site Name": "sitename",
+                "Unique Target ID": "target_id",
+                "Short Site ID": "short_site_id",
+                "Site Name": "site_name",
                 "Sub-site": "subsite",
                 "Internal ID": "internal_id",
                 "Short Target ID": "short_target_id",
-                "Target Type ID": "target_type_id",
+                "Target Type ID": "target_type",
                 "Target description": "target_description",
                 "Bounding polygon (WKT, WGS84)": "geometry",
                 "Coverage (km2)": "coverage",
@@ -405,7 +386,7 @@ class Ingester:
             inplace=True,
             errors="ignore",
         )
-        targets_df = targets_df[targets_df["unique_target_id"] != "--"]
+        targets_df = targets_df[targets_df["target_id"] != "--"]
         targets_df = targets_df.replace(math.nan, None)
         targets_df = targets_df.replace(to_replace="-", value=None)
 
@@ -426,11 +407,11 @@ class Ingester:
 
     def validate_nat_targets(self, nat_targets_df):
         mandatory_fields = [
-            "unique_target_id",
-            "short_site_identifier",
-            "sitename",
+            "target_id",
+            "short_site_id",
+            "site_name",
             "short_target_id",
-            "target_type_id",
+            "target_type",
             "geometry",
             "period_start",
             "period_stop",
@@ -454,21 +435,21 @@ class Ingester:
     ) -> None:
         targets_df.rename(
             columns={
-                "Unique Target ID": "unique_target_id",
-                "Short Site ID": "short_site_identifier",
-                "Site Name": "sitename",
+                "Unique Target ID": "target_id",
+                "Short Site ID": "short_site_id",
+                "Site Name": "site_name",
                 "Sub-site": "subsite",
                 "Internal ID": "internal_id",
                 "Short Target ID": "short_target_id",
-                "Target Type ID": "target_type_id",
+                "Target Type ID": "target_type",
                 "Target description": "target_description",
-                "Approximage Latitude\n(decimal deg, WGS84)": "apprx_latitude",
-                "Approximate Latitude\n(decimal deg, WGS84)": "apprx_latitude",
-                "Approximate Longitude\n(decimal deg WGS84)": "apprx_longitude",
-                "Approximate Longitude\n(decimal deg, WGS84)": "apprx_longitude",
-                "Approximate elevation\n(meters, WGS84)": "apprx_elevation",
-                "Approximate Azimuth angle\n(decimal deg)": "apprx_azimuth",
-                "Approximate Boresight angle\n(decimal deg)": "apprx_boresight",
+                "Approximage Latitude\n(decimal deg, WGS84)": "approx_lat",
+                "Approximate Latitude\n(decimal deg, WGS84)": "approx_lat",
+                "Approximate Longitude\n(decimal deg WGS84)": "approx_lon",
+                "Approximate Longitude\n(decimal deg, WGS84)": "approx_lon",
+                "Approximate elevation\n(meters, WGS84)": "approx_h",
+                "Approximate Azimuth angle\n(decimal deg)": "approx_azimuth_angle",
+                "Approximate Boresight angle\n(decimal deg)": "approx_boresight_angle",
                 "Primary direction": "primary_direction",
                 "Side length (m)": "side_length",
                 "Photo link": "photo_link",
@@ -476,13 +457,13 @@ class Ingester:
                 "Manufacturer": "manufacturer",
                 "Purpose of target": "purpose",
                 "Reference RCS (dBm2)": "rcs",
-                "Reference RCS measurement sensor": "rcs_sensor",
-                "Reference RCS measurement expected accuracy (dB)": "rcs_accuracy",
-                "Reference RCS measurement boresite angle (decimal deg)": "rcs_angle",
-                "Reference RCS measurement wavelength (m)": "rcs_wavelength",
-                "Reference RCS measurement bandwidth (Hz)": "rcs_bandwidth",
-                "RCS accuracy determination method": "rcs_method",
-                "RCS angle dependency availablity": "rcs_angle_dependency",
+                "Reference RCS measurement sensor": "rcs_measurement_conditions",
+                "Reference RCS measurement expected accuracy (dB)": "reference_rcs_accuracy",
+                "Reference RCS measurement boresite angle (decimal deg)": "reference_rcs_boresight_angle",
+                "Reference RCS measurement wavelength (m)": "reference_rcs_wavelength",
+                "Reference RCS measurement bandwidth (Hz)": "reference_rcs_bandwidth",
+                "RCS accuracy determination method": "rcs_accuracy_determination",
+                "RCS angle dependency availablity": "rcs_angle_dependency_availability",
                 "Composition": "composition",
                 "Characterization of reflector ": "characterization",
                 "Characterization of reflector": "characterization",
@@ -490,7 +471,7 @@ class Ingester:
             inplace=True,
             errors="ignore",
         )
-        targets_df = targets_df[targets_df["unique_target_id"] != "--"]
+        targets_df = targets_df[targets_df["target_id"] != "--"]
         targets_df = targets_df.replace(math.nan, None)
 
         self.validate_art_targets(targets_df)
@@ -498,12 +479,13 @@ class Ingester:
             return
         print("Targets validation successful.")
 
+        targets_df = targets_df.replace(to_replace="not provided", value=None)
         self.upload_photos(targets_df)
 
-        if unavailability is not None:
+        if len(unavailability) > 0:
             unavailability.rename(
                 columns={
-                    "Unique Target ID": "unique_target_id",
+                    "Unique Target ID": "target_id",
                     "Start of Unavailability (YYYY-MM-DD)": "unavailability_start",
                     "End of Unavailability (YYYY-MM-DD)": "unavailability_end",
                 },
@@ -512,16 +494,14 @@ class Ingester:
             )
             unavailability = unavailability.drop("Unique Site ID", axis=1)
             unavailability = unavailability.drop("Internal ID", axis=1)
-            unavailability = unavailability.groupby(
-                "unique_target_id", as_index=False
-            ).agg({"unavailability_start": list, "unavailability_end": list})
-            targets_df = targets_df.merge(unavailability, on="unique_target_id")
+            unavailability = unavailability.groupby("target_id", as_index=False).agg(
+                {"unavailability_start": list, "unavailability_end": list}
+            )
+            targets_df = targets_df.merge(unavailability, on="target_id")
 
         gdf = gpd.GeoDataFrame(
             targets_df,
-            geometry=gpd.points_from_xy(
-                targets_df.apprx_longitude, targets_df.apprx_latitude
-            ),
+            geometry=gpd.points_from_xy(targets_df.approx_lon, targets_df.approx_lat),
             crs=4326,
         )
 
@@ -535,15 +515,15 @@ class Ingester:
 
     def validate_art_targets(self, art_targets_df):
         mandatory_fields = [
-            "unique_target_id",
-            "short_site_identifier",
+            "target_id",
+            "short_site_id",
             "short_target_id",
-            "target_type_id",
-            "apprx_latitude",
-            "apprx_longitude",
-            "apprx_elevation",
-            "apprx_azimuth",
-            "apprx_boresight",
+            "target_type",
+            "approx_lat",
+            "approx_lon",
+            "approx_h",
+            "approx_azimuth_angle",
+            "approx_boresight_angle",
             "primary_direction",
             "side_length",
             "operational",
@@ -562,7 +542,7 @@ class Ingester:
                     else:
                         raise ValueError(message)
             try:
-                float(row[1]["apprx_latitude"])
+                float(row[1]["approx_lat"])
             except ValueError:
                 message = f"cr, row {row[0] + 6}: invalid entry for mandatory field "
                 f"'Approximate Latitude'. Please enter a valid "
@@ -571,7 +551,7 @@ class Ingester:
                     print(message)
                 else:
                     raise ValueError(message)
-            if row[1]["apprx_latitude"] < -90 or row[1]["apprx_latitude"] > 90:
+            if row[1]["approx_lat"] < -90 or row[1]["approx_lat"] > 90:
                 message = f"cr, row {row[0] + 6}: invalid entry for mandatory field "
                 f"'Approximate Latitude'. Please enter a valid "
                 f"floating point number > -90 and < 90. "
@@ -580,7 +560,7 @@ class Ingester:
                 else:
                     raise ValueError(message)
             try:
-                float(row[1]["apprx_longitude"])
+                float(row[1]["approx_lon"])
             except ValueError:
                 message = f"cr, row {row[0] + 6}: invalid entry for mandatory field "
                 f"'Approximate Longitude'. Please enter a valid "
@@ -589,7 +569,7 @@ class Ingester:
                     print(message)
                 else:
                     raise ValueError(message)
-            if row[1]["apprx_longitude"] < -180 or row[1]["apprx_longitude"] > 180:
+            if row[1]["approx_lon"] < -180 or row[1]["approx_lon"] > 180:
                 message = f"cr, row {row[0] + 6}: invalid entry for mandatory field "
                 f"'Approximate Longitude'. Please enter a valid "
                 f"floating point number > -180 and < 180."
@@ -598,7 +578,7 @@ class Ingester:
                 else:
                     raise ValueError(message)
             try:
-                float(row[1]["apprx_elevation"])
+                float(row[1]["approx_h"])
             except ValueError:
                 message = f"cr, row {row[0] + 6}: invalid entry for mandatory field "
                 f"'Approximate Elevation'. Please enter a valid "
@@ -608,10 +588,11 @@ class Ingester:
                 else:
                     raise ValueError(message)
             try:
-                float(row[1]["side_length"])
-                if row[1]["side_length"] <= 0:
-                    raise ValueError
-            except ValueError:
+                if not row[1]["side_length"] == "not provided":
+                    float(row[1]["side_length"])
+                    if row[1]["side_length"] <= 0:
+                        raise ValueError
+            except (ValueError, TypeError):
                 message = (
                     f"cr, row {row[0] + 6}: invalid entry for mandatory field "
                     f"'Side Length'. Please enter a valid "
@@ -635,8 +616,8 @@ class Ingester:
                 else:
                     raise ValueError(message)
             try:
-                if row[1]["rcs_accuracy"]:
-                    float(row[1]["rcs_accuracy"])
+                if row[1]["reference_rcs_accuracy"]:
+                    float(row[1]["reference_rcs_accuracy"])
             except ValueError:
                 message = (
                     f"cr, row {row[0] + 6}: invalid entry for field "
@@ -648,8 +629,8 @@ class Ingester:
                 else:
                     raise ValueError(message)
             try:
-                if row[1]["rcs_angle"]:
-                    float(row[1]["rcs_angle"])
+                if row[1]["reference_rcs_boresight_angle"]:
+                    float(row[1]["reference_rcs_boresight_angle"])
             except ValueError:
                 message = (
                     f"cr, row {row[0] + 6}: invalid entry for field "
@@ -661,7 +642,10 @@ class Ingester:
                 else:
                     raise ValueError(message)
             try:
-                if row[1]["rcs_wavelength"] and row[1]["rcs_wavelength"] <= 0:
+                if (
+                    row[1]["reference_rcs_wavelength"]
+                    and row[1]["reference_rcs_wavelength"] <= 0
+                ):
                     raise ValueError
             except ValueError:
                 message = (
@@ -674,9 +658,13 @@ class Ingester:
                 else:
                     raise ValueError(message)
             try:
-                if row[1]["rcs_bandwidth"] and row[1]["rcs_bandwidth"] <= 0:
+                if (
+                    row[1]["reference_rcs_bandwidth"]
+                    and not row[1]["reference_rcs_bandwidth"] == "not provided"
+                    and row[1]["reference_rcs_bandwidth"] <= 0
+                ):
                     raise ValueError
-            except ValueError:
+            except (ValueError, TypeError):
                 message = (
                     f"cr, row {row[0] + 6}: invalid entry for field "
                     f"'Reference RCS measurement bandwidth (Hz)'. Please enter"
@@ -686,34 +674,6 @@ class Ingester:
                     print(message)
                 else:
                     raise ValueError(message)
-
-    def create_surveys_collection(self):
-        properties = {
-            "unique_target_id": "varchar",
-            "survey_date": "date",
-            "lat": "float",
-            "lon": "float",
-            "elevation": "float",
-            "position_accuracy": "float",
-            "coordinate_reference_system": "varchar",
-            "azimuth_angle": "float",
-            "boresight_angle": "float",
-            "tilt": "float",
-            "accuracy": "float",
-            "fence": "boolean",
-            "measurement_method": "varchar",
-            "offset_method": "varchar",
-            "corrections": "varchar",
-            "duration": "varchar",
-            "photo_link": "varchar",
-            "status_report": "varchar",
-        }
-
-        if not self.geoDB.collection_exists(SURVEYS_COLLECTION, DATABASE):
-            self.geoDB.create_collection(
-                SURVEYS_COLLECTION, properties, database=DATABASE
-            )
-            print("Created surveys table.")
 
     def ingest_surveys(self, calibration_site_xls: str, target_type: str):
         if target_type == "natural":
@@ -737,12 +697,12 @@ class Ingester:
             return
         existing_surveys = self.geoDB.get_collection(
             NAT_SURVEYS_COLLECTION,
-            "select=unique_target_id,survey_date",
+            "select=target_id,survey_date",
             database=DATABASE,
         )
         existing_survey_ids = []
         dates = list(existing_surveys["survey_date"])
-        for i, target_id in enumerate(list(existing_surveys["unique_target_id"])):
+        for i, target_id in enumerate(list(existing_surveys["target_id"])):
             existing_survey_ids.append(target_id + "_" + dates[i])
         print(existing_survey_ids)
 
@@ -752,12 +712,12 @@ class Ingester:
             return
         existing_surveys = self.geoDB.get_collection(
             SURVEYS_COLLECTION,
-            "select=unique_target_id,survey_date",
+            "select=target_id,survey_date",
             database=DATABASE,
         )
         existing_survey_ids = []
         dates = list(existing_surveys["survey_date"])
-        for i, target_id in enumerate(list(existing_surveys["unique_target_id"])):
+        for i, target_id in enumerate(list(existing_surveys["target_id"])):
             existing_survey_ids.append(target_id + "_" + dates[i])
         print(existing_survey_ids)
 
@@ -791,7 +751,7 @@ class Ingester:
         )
         surveys_df.rename(
             columns={
-                "Unique Target ID": "unique_target_id",
+                "Unique Target ID": "target_id",
                 "Start Survey Period (YYYY-MM-DD)": "survey_start",
                 "Stop Survey Period (YYYY-MM-DD)": "survey_stop",
                 "Mission": "mission",
@@ -817,7 +777,7 @@ class Ingester:
             errors="ignore",
         )
 
-        surveys_df = surveys_df[surveys_df["unique_target_id"] != ""]
+        surveys_df = surveys_df[surveys_df["target_id"] != ""]
         surveys_df = surveys_df.replace(math.nan, None)
 
         self.validate_nat_surveys(surveys_df)
@@ -854,32 +814,35 @@ class Ingester:
         )
         surveys_df.rename(
             columns={
-                "Unique Target ID": "unique_target_id",
+                "Unique Target ID": "target_id",
                 "Survey date (YYYY-MM-DD)": "survey_date",
                 "Latitude (decimal deg)": "lat",
                 "Longitude (decimal deg)": "lon",
                 "Elevation (m)": "elevation",
                 "Position accuracy (cm)": "position_accuracy",
-                "Coordinate Reference System (WKT or EPSG)": "coordinate_reference_system",
+                "Coordinate Reference System (WKT or EPSG)": "crs",
+                "CRS X velocity (mm/year)": "crs_vx",
+                "CRS Y velocity (mm/year)": "crs_vy",
+                "CRS Z velocity (mm/year)": "crs_vz",
                 "Azimuth angle\n(decimal deg)": "azimuth_angle",
                 "Boresight angle\n(decimal deg)": "boresight_angle",
-                "Tilt (decimal deg)": "tilt",
-                "Pointing accuracy\n(decimal deg)": "accuracy",
+                "Tilt (decimal deg)": "tilt_angle",
+                "Pointing accuracy\n(decimal deg)": "pointing_accuracy",
                 "Fence": "fence",
                 "Measurement method": "measurement_method",
                 "Offset method": "offset_method",
-                "Applied corrections": "corrections",
-                "GNSS measusement duration\n(hh:mm:ss)": "duration",
-                "GNSS measurement duration\n(hh:mm:ss)": "duration",
+                "Applied corrections": "applied_corrections",
+                "GNSS measusement duration\n(hh:mm:ss)": "gnss_measurement_duration",
+                "GNSS measurement duration\n(hh:mm:ss)": "gnss_measurement_duration",
                 "Photo link": "photo_link",
-                "Status report": "status_report",
+                "Status report": "report_status",
             },
             inplace=True,
             errors="ignore",
         )
 
-        surveys_df = surveys_df[surveys_df["unique_target_id"] != ""]
-        surveys_df = surveys_df[surveys_df.unique_target_id.notnull()]
+        surveys_df = surveys_df[surveys_df["target_id"] != ""]
+        surveys_df = surveys_df[surveys_df.target_id.notnull()]
         surveys_df = surveys_df.replace(math.nan, None)
         surveys_df["elevation"] = surveys_df["elevation"].astype(float)
         surveys_df = surveys_df.dropna(axis=0, how="all")
@@ -888,6 +851,8 @@ class Ingester:
         if self.validation_mode:
             return None
         print("Surveys validation successful.")
+
+        surveys_df = surveys_df.replace(to_replace="not applicable", value=None)
 
         surveys_df.insert(len(surveys_df.columns), "geometry", "POINT(0 0)")
         surveys_df["geometry"] = gpd.GeoSeries.from_wkt(surveys_df["geometry"])
@@ -950,7 +915,7 @@ class Ingester:
 
     def validate_nat_surveys(self, surveys_df):
         mandatory_fields = [
-            "unique_target_id",
+            "target_id",
             "survey_start",
             "survey_stop",
             "mission",
@@ -1010,17 +975,20 @@ class Ingester:
 
     def validate_art_surveys(self, surveys_df):
         mandatory_fields = [
-            "unique_target_id",
+            "target_id",
             "survey_date",
             "lat",
             "lon",
             "elevation",
             "position_accuracy",
-            "coordinate_reference_system",
+            "crs",
+            "crs_vx",
+            "crs_vy",
+            "crs_vz",
             "azimuth_angle",
             "boresight_angle",
-            "tilt",
-            "accuracy",
+            "tilt_angle",
+            "pointing_accuracy",
             "fence",
             "measurement_method",
             "offset_method",
@@ -1056,8 +1024,8 @@ class Ingester:
             self.validate_crs(row)
             self.validate_azimuth_angle(row)
             self.validate_boresight_angle(row)
-            self.validate_tilt(row)
-            self.validate_accuracy(row)
+            self.validate_tilt_angle(row)
+            self.validate_pointing_accuracy(row)
             self.validate_duration(row)
 
     def validate_lat(self, row):
@@ -1105,7 +1073,7 @@ class Ingester:
                 raise ValueError(message)
 
     def validate_crs(self, row):
-        crs = row[1]["coordinate_reference_system"]
+        crs = row[1]["crs"]
         try:
             pyproj.CRS.from_user_input(crs)
         except pyproj.exceptions.CRSError:
@@ -1121,7 +1089,7 @@ class Ingester:
 
     def validate_duration(self, row):
         try:
-            duration_parts = row[1]["duration"].split(":")
+            duration_parts = row[1]["gnss_measurement_duration"].split(":")
             if len(duration_parts) != 3:
                 raise ValueError
             int(duration_parts[0])
@@ -1139,21 +1107,27 @@ class Ingester:
             else:
                 raise ValueError(message)
 
-    def validate_tilt(self, row):
+    def validate_tilt_angle(self, row):
         message = (
-            f"surveys, row {row[0] + 6}: invalid entry '{row[1]['tilt']}' "
+            f"surveys, row {row[0] + 6}: invalid entry '{row[1]['tilt_angle']}' "
             f"for mandatory field 'Tilt angle (decimal deg)'. Please enter a "
             f"valid floating point number >= 0 and < 360."
         )
+        if row[1]["tilt_angle"] == "not applicable":
+            return
         try:
-            float(row[1]["tilt"])
+            float(row[1]["tilt_angle"])
         except ValueError:
             if self.validation_mode:
                 print(message)
                 return
             else:
                 raise ValueError(message)
-        if type(row[1]["tilt"]) == str or row[1]["tilt"] < 0 or row[1]["tilt"] >= 360:
+        if (
+            type(row[1]["tilt_angle"]) == str
+            or row[1]["tilt_angle"] < 0
+            or row[1]["tilt_angle"] >= 360
+        ):
             if self.validation_mode:
                 print(message)
             else:
@@ -1165,6 +1139,8 @@ class Ingester:
             f"for mandatory field 'Boresight angle (decimal deg)'. Please enter a "
             f"valid floating point number >= -360 and <= 360."
         )
+        if row[1]["boresight_angle"] == "not applicable":
+            return
         try:
             float(row[1]["boresight_angle"])
         except ValueError:
@@ -1185,6 +1161,8 @@ class Ingester:
             f"mandatory field 'Azimuth angle (decimal deg)'. Please enter a "
             f"valid floating point number >= 0 and < 360."
         )
+        if row[1]["azimuth_angle"] == "not applicable":
+            return
         try:
             float(row[1]["azimuth_angle"])
         except ValueError:
@@ -1199,14 +1177,14 @@ class Ingester:
             else:
                 raise ValueError(message)
 
-    def validate_accuracy(self, row):
+    def validate_pointing_accuracy(self, row):
         message = (
-            f"surveys, row {row[0] + 6}: invalid entry '{row[1]['accuracy']}' "
+            f"surveys, row {row[0] + 6}: invalid entry '{row[1]['pointing_accuracy']}' "
             f"for mandatory field 'Pointing accuracy (decimal deg)'. Please enter a "
             f"valid floating point number >= 0."
         )
         try:
-            float(row[1]["accuracy"])
+            float(row[1]["pointing_accuracy"])
         except ValueError:
             if self.validation_mode:
                 print(message)
@@ -1214,7 +1192,7 @@ class Ingester:
             else:
                 raise ValueError(message)
 
-        if row[1]["accuracy"] < 0:
+        if row[1]["pointing_accuracy"] < 0:
             if self.validation_mode:
                 print(message)
             else:
@@ -1303,7 +1281,7 @@ class Ingester:
             self.geoDB.update_collection(
                 SITES_COLLECTION,
                 {"form_url": form_url},
-                f"short_site_identifier=eq.{site_id}",
+                f"short_site_id=eq.{site_id}",
                 database=DATABASE,
             )
 
@@ -1325,7 +1303,7 @@ class Ingester:
             else:
                 message = (
                     f"site, row {row.name + 6}: Invalid value for field "
-                    f"'centroid'."
+                    f"'centroid'. "
                     f"Please either provide a position given by comma-separated "
                     f"lat and lon values (e.g. 36.578, 120.356), or provide the "
                     f"position as WKT (e.g. POINT(120.356 36.578)), or leave the "
@@ -1333,6 +1311,7 @@ class Ingester:
                 )
                 if self.validation_mode:
                     print(message)
+                    return row
                 else:
                     raise ValueError(message)
 
@@ -1348,25 +1327,25 @@ class Ingester:
         )
         unavailabilities.rename(
             columns={
-                "Unique Target ID": "unique_target_id",
+                "Unique Target ID": "target_id",
                 "Start of Unavailability (YYYY-MM-DD)": "unavailability_start",
                 "End of Unavailability (YYYY-MM-DD)": "unavailability_end",
             },
             inplace=True,
         )
 
-        unavailabilities = unavailabilities.groupby(
-            "unique_target_id", as_index=False
-        ).agg({"unavailability_start": list, "unavailability_end": list})
+        unavailabilities = unavailabilities.groupby("target_id", as_index=False).agg(
+            {"unavailability_start": list, "unavailability_end": list}
+        )
 
         form_url = self.upload_unavailability_xls(unavailability_xls)
 
         for index, row in unavailabilities.iterrows():
-            unique_target_id = row["unique_target_id"]
+            target_id = row["target_id"]
             previous_values = self.geoDB.get_collection(
                 TARGETS_COLLECTION,
                 query=f"select=unavailability_start,"
-                f"unavailability_end,unavailability_forms&unique_target_id=eq.{unique_target_id}",
+                f"unavailability_end,unavailability_forms&target_id=eq.{target_id}",
                 database=DATABASE,
             )
             new_unavailability_start = (
@@ -1397,10 +1376,10 @@ class Ingester:
                     "unavailability_end": new_unavailability_end,
                     "unavailability_forms": new_unavailability_forms,
                 },
-                query=f"unique_target_id=eq.{unique_target_id}",
+                query=f"target_id=eq.{target_id}",
                 database=DATABASE,
             )
-            print(f"Updated unavailability periods for target {unique_target_id}")
+            print(f"Updated unavailability periods for target {target_id}")
 
     def upload_unavailability_xls(self, xls: str) -> str:
         folder_id = self.get_folder_id("submission_forms")
