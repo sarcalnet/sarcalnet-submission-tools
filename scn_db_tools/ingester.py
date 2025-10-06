@@ -246,7 +246,7 @@ class Ingester:
                 website = row[1]["website"]
                 if website and not str(website) == "nan":
                     if website.startswith("http"):
-                        if requests.get(website).status_code >= 400:
+                        if requests.get(website, verify=False).status_code >= 400:
                             raise requests.exceptions.ConnectionError
                     else:
                         if (
@@ -873,7 +873,7 @@ class Ingester:
                         )
                         parts = filename.split(".")
                         filename = f"{'.'.join(parts[:-1])}_{identifier}.{parts[-1]}"
-                    photo_response = requests.get(photo_link)
+                    photo_response = requests.get(photo_link, verify=False)
                     with open(filename, "wb") as f:
                         f.write(photo_response.content)
                 else:
