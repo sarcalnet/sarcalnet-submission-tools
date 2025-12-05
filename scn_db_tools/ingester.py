@@ -113,9 +113,9 @@ class Ingester:
         sites_df = sites_df.apply(self.compute_centroid_from_boundaries, axis=1)
 
         self.validate_sites(sites_df)
+        print("Sites validation successful.")
         if self.validation_mode:
             return None
-        print("Sites validation successful.")
 
         sites_df["active_until"] = sites_df["active_until"].replace("-", None)
         sites_df.insert(len(sites_df.columns), "endorsement", "review")
@@ -195,7 +195,7 @@ class Ingester:
         ]
         for row in sites_df.iterrows():
             for col in mandatory_fields:
-                if str(row[1][col]) == "nan":
+                if col not in row[1] or str(row[1][col]) == "nan":
                     message = (
                         f"site, row {row[0] + 6}: missing entry for mandatory field "
                         f"'{col}'. Please fill in all mandatory fields,"
@@ -380,8 +380,8 @@ class Ingester:
                 "Bounding polygon (WKT, WGS84)": "geometry",
                 "Coverage (km2)": "coverage",
                 "Mask polygon (WKT, WGS84)": "mask_polygon",
-                "Start Monitoring Period (YYYY-MM-DD)": "period_start",
-                'Stop Monitoring Period (YYYY-MM-DD or "-")': "period_stop",
+                "Start Monitoring Period (YYYY-MM-DD)": "start_monitoring",
+                'Stop Monitoring Period (YYYY-MM-DD or "-")': "stop_monitoring",
             },
             inplace=True,
             errors="ignore",
@@ -391,9 +391,9 @@ class Ingester:
         targets_df = targets_df.replace(to_replace="-", value=None)
 
         self.validate_nat_targets(targets_df)
+        print("Targets validation successful.")
         if self.validation_mode:
             return
-        print("Targets validation successful.")
 
         gdf = gpd.GeoDataFrame(targets_df)
 
@@ -413,12 +413,12 @@ class Ingester:
             "short_target_id",
             "target_type",
             "geometry",
-            "period_start",
-            "period_stop",
+            "start_monitoring",
+            "stop_monitoring",
         ]
         for row in nat_targets_df.iterrows():
             for col in mandatory_fields:
-                if str(row[1][col]) == "nan":
+                if col not in row[1] or str(row[1][col]) == "nan":
                     message = (
                         f"dt, row {row[0] + 6}: missing entry for "
                         f"mandatory field '{col}'. Please fill in all"
@@ -475,9 +475,9 @@ class Ingester:
         targets_df = targets_df.replace(math.nan, None)
 
         self.validate_art_targets(targets_df)
+        print("Targets validation successful.")
         if self.validation_mode:
             return
-        print("Targets validation successful.")
 
         targets_df = targets_df.replace(to_replace="not provided", value=None)
         self.upload_photos(targets_df)
@@ -531,12 +531,16 @@ class Ingester:
         ]
         for row in art_targets_df.iterrows():
             for col in mandatory_fields:
-                if str(row[1][col]) == "nan":
+                if (
+                    col not in row[1]
+                    or str(row[1][col]) == "nan"
+                    or str(row[1][col]) == "None"
+                ):
                     message = (
                         f"cr, row {row[0] + 6}: missing entry for mandatory field "
+                        f"'{col}'. Please fill in all mandatory fields, "
+                        f"or remove the entire row."
                     )
-                    f"'{col}'. Please fill in all mandatory fields, "
-                    f"or remove the entire row."
                     if self.validation_mode:
                         print(message)
                     else:
@@ -756,21 +760,21 @@ class Ingester:
                 "Stop Survey Period (YYYY-MM-DD)": "survey_stop",
                 "Mission": "mission",
                 "Carrier Frequency (GHz)": "carrier_frequency",
-                "Polarization Channels": "polarization_channels",
-                "UTC Observation Time (HH:MM)": "observation_time_utc",
-                "Local Observation time (HH:MM)": "observation_time_local",
+                "Polarization Channel": "polarizations",
+                "UTC Observation Time (HH:MM)": "observation_time",
+                "Local Observation time (HH:MM)": "local_observation_time",
                 "Incidence Angle Range (min - max, in decimal deg)": "incidence_angle_range",
                 "Backscatter coefficient type": "backscatter_coefficient_type",
-                "Mean Backscatter Coefficient (dB)": "backscatter_coefficient_mean",
-                "Backscatter Coefficient Standard Deviation (dB)": "backscatter_coefficient_std",
+                "Mean Backscatter Coefficient (dB)": "backscatter_coeff_mean",
+                "Backscatter Coefficient Standard Deviation (dB)": "backscatter_coeff_std",
                 "Reference Surface": "reference_surface",
                 "Samples": "samples",
                 "Relative Orbit": "relative_orbit",
-                "Orbit direction": "orbit_direction",
+                "Orbit direction": "orbit_dir",
                 "Look side": "look_side",
                 "Acquisition Mode": "acquisition_mode",
                 "Beam ID": "beam_id",
-                "Scene identifier(s)": "scene_identifier",
+                "Scene identifier(s)": "scene_ids",
                 "Query URL": "query_url",
             },
             inplace=True,
@@ -848,9 +852,9 @@ class Ingester:
         surveys_df = surveys_df.dropna(axis=0, how="all")
 
         self.validate_art_surveys(surveys_df)
+        print("Surveys validation successful.")
         if self.validation_mode:
             return None
-        print("Surveys validation successful.")
 
         surveys_df = surveys_df.replace(to_replace="not applicable", value=None)
 
@@ -920,22 +924,22 @@ class Ingester:
             "survey_stop",
             "mission",
             "carrier_frequency",
-            "polarization_channels",
-            "observation_time_utc",
+            "polarizations",
+            "observation_time",
             "incidence_angle_range",
             "backscatter_coefficient_type",
-            "backscatter_coefficient_mean",
-            "backscatter_coefficient_std",
+            "backscatter_coeff_mean",
+            "backscatter_coeff_std",
             "samples",
             "relative_orbit",
-            "orbit_direction",
+            "orbit_dir",
             "look_side",
             "acquisition_mode",
             "beam_id",
         ]
         for row in surveys_df.iterrows():
             for col in mandatory_fields:
-                if str(row[1][col]) == "nan":
+                if col not in row[1] or str(row[1][col]) == "nan":
                     message = (
                         f"surveys, row {row[0] + 6}: missing entry for mandatory field "
                         f"'{col}'. Please fill in all mandatory "
@@ -995,7 +999,11 @@ class Ingester:
         ]
         for row in surveys_df.iterrows():
             for col in mandatory_fields:
-                if str(row[1][col]) == "nan":
+                if (
+                    col not in row[1]
+                    or str(row[1][col]) == "nan"
+                    or str(row[1][col]) == "None"
+                ):
                     message = (
                         f"surveys, row {row[0] + 6}: missing entry for "
                         f"mandatory field '{col}'. Please fill in all mandatory "
