@@ -24,13 +24,13 @@ class TemplateFillerTest(unittest.TestCase):
             if collection == "calibration_sites":
                 if "OR" in where:
                     self.assertEqual(
-                        "(short_site_id = 'VISB' AND primary_target_type_id = 'AT') OR (short_site_id = 'GNLD' AND primary_target_type_id = 'DT')",
+                        "(short_site_id = 'VISB' AND primary_target_type_id like 'AT%') OR (short_site_id = 'GNLD' AND primary_target_type_id like 'DT%')",
                         where,
                     )
                     return self.read_csv("test_sites.csv")
                 else:
                     self.assertEqual(
-                        "(short_site_id = 'SOME' AND primary_target_type_id = 'DT')",
+                        "(short_site_id = 'SOME' AND primary_target_type_id like 'DT%')",
                         where,
                     )
                     return None
