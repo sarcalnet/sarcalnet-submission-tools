@@ -250,6 +250,7 @@ class Outputter:
                 + "-"
                 + sites["primary_target_type_id"].astype(str).str[:2]
             )
+            sites["special_requests"] = sites["special_requests"].replace({True: "Y", False: "N"})
             sites.insert(0, "unique_site_id", sites.pop("unique_site_id"))
             sites.rename(
                 columns={
@@ -282,6 +283,8 @@ class Outputter:
                 excel_writer, sheet_name="site", columns=self.sites_columns, index=False
             )
             targets: GeoDataFrame = data["targets"]
+            targets["operational"] = targets["operational"].replace({True: "Y", False: "N"})
+            targets["rcs_angle_dependency_availability"] = targets["rcs_angle_dependency_availability"].replace({True: "Y", False: "N"})
             if targets is not None:
                 targets.rename(
                     columns={
@@ -321,6 +324,7 @@ class Outputter:
                     excel_writer, sheet_name="cr", columns=self.cr_columns, index=False
                 )
             surveys: GeoDataFrame = data["surveys"]
+            surveys["fence"] = surveys["fence"].replace({True: "Y", False: "N"})
             if surveys is not None:
                 surveys.rename(
                     columns={
