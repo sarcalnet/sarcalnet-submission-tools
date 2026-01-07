@@ -497,7 +497,8 @@ class Ingester:
             unavailability = unavailability.groupby("target_id", as_index=False).agg(
                 {"unavailability_start": list, "unavailability_end": list}
             )
-            targets_df = targets_df.merge(unavailability, on="target_id")
+            targets_df.merge(unavailability, on="target_id", how="left")
+            targets_df = targets_df.replace(math.nan, None)
 
         gdf = gpd.GeoDataFrame(
             targets_df,
