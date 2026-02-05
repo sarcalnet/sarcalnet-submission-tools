@@ -22,7 +22,11 @@ import warnings
 from typing import List
 
 import click
+import pandas as pd
 from geopandas import GeoDataFrame
+from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
+from copy import copy
 from pandas import ExcelWriter
 from xcube_geodb.core.geodb import GeoDBClient
 
@@ -121,130 +125,88 @@ class DataFetcher:
 
 
 class Outputter:
-    def __init__(self):
-        self.sites_columns = [
-            "Unique Site ID",
-            "Short Site ID",
-            "Country",
-            "Site Name",
-            "Province / state / region",
-            "Primary Target Type ID",
-            "Target Types",
-            "Primary Sensor",
-            "Willing to consider special requests",
-            "Responsible Organization",
-            "Website",
-            "Active from (YYYY-MM-DD)",
-            'Active until (YYYY-MM-DD or "-")',
-            "POC Name",
-            "POC email",
-            "Additional POC Name",
-            "Additional POC email",
-            "Centroid of the site (latitude and longitude in decima deg)",
-            "Boundaries",
-            "Planned maintenance schedule",
-            "Characteristics",
-        ]
-        self.cr_columns = [
-            "Unique Target ID",
-            "Short Site ID",
-            "Site Name",
-            "Sub-site",
-            "Internal ID",
-            "Short Target ID",
-            "Target Type ID",
-            "Target description",
-            "Approximate Latitude\n(decimal deg, WGS84)",
-            "Approximate Longitude\n(decimal deg, WGS84)",
-            "Approximate elevation\n(meters, WGS84)",
-            "Approximate Azimuth angle\n(decimal deg)",
-            "Approximate Boresight angle\n(decimal deg)",
-            "Primary direction",
-            "Side length (m)",
-            "Photo link",
-            "Operational",
-            "Manufacturer",
-            "Purpose of target",
-            "Reference RCS (dBm2)",
-            "Reference RCS measurement sensor",
-            "Reference RCS measurement expected accuracy (dB)",
-            "Reference RCS measurement boresite angle (decimal deg)",
-            "Reference RCS measurement wavelength (m)",
-            "Reference RCS measurement bandwidth (Hz)",
-            "RCS accuracy determination method",
-            "RCS angle dependency availablity",
-            "Composition",
-            "Characterization of reflector",
-        ]
-        self.survey_columns = [
-            "Unique Target ID",
-            "Survey date (YYYY-MM-DD)",
-            "Latitude (decimal deg)",
-            "Longitude (decimal deg)",
-            "Elevation (m)",
-            "Position accuracy (cm)",
-            "Coordinate Reference System (WKT or EPSG)",
-            "CRS X velocity (mm/year)",
-            "CRS Y velocity (mm/year)",
-            "CRS Z velocity (mm/year)",
-            "Azimuth angle\n(decimal deg)",
-            "Boresight angle\n(decimal deg)",
-            "Tilt (decimal deg)",
-            "Pointing accuracy\n(decimal deg)",
-            "Fence",
-            "Measurement method",
-            "Offset method",
-            "Applied corrections",
-            "GNSS measurement duration\n(hh:mm:ss)",
-            "Photo link",
-            "Status report",
-        ]
 
-        self.dt_columns = [
-            "Unique Target ID",
-            "Short Site ID",
-            "Site Name",
-            "Sub-site",
-            "Internal ID",
-            "Short Target ID",
-            "Target Type ID",
-            "Target description",
-            "Bounding polygon (WKT, WGS84)",
-            "Coverage (km2)",
-            "Mask polygon (WKT, WGS84)",
-            "Start Monitoring Period (YYYY-MM-DD)",
-            'Stop Monitoring Period (YYYY-MM-DD or "-")',
-        ]
+    @staticmethod
+    def copy_sheet_formatting(source_file, sheet_name, target_file):
+        """
+        Copy formatting from one sheet in source_file to a sheet in target_file,
+        keeping the target values unchanged.
 
-        self.nat_survey_columns = [
-            "Unique Target ID",
-            "Start Survey Period (YYYY-MM-DD)",
-            "Stop Survey Period (YYYY-MM-DD)",
-            "Mission",
-            "Carrier Frequency (GHz)",
-            "Polarization Channel",
-            "UTC Observation Time (HH:MM)",
-            "Local Observation time (HH:MM)",
-            "Incidence Angle Range (min - max, in decimal deg)",
-            "Backscatter coefficient type",
-            "Mean Backscatter Coefficient (dB)",
-            "Backscatter Coefficient Standard Deviation (dB)",
-            "Reference Surface",
-            "Samples",
-            "Relative Orbit",
-            "Orbit direction",
-            "Look side",
-            "Acquisition Mode",
-            "Beam ID",
-            "Scene identifier(s)",
-            "Query URL",
-        ]
+        Parameters
+        ----------
+        source_file : str
+            Path to the source Excel file (contains formatting to copy).
+        sheet_name : str
+            Name of the sheet in the source file to copy formatting from.
+        target_file : str
+            Path to the target Excel file (contains values to keep).
+        """
+        # Load workbooks
+        wb_source = load_workbook(source_file)
+        wb_target = load_workbook(target_file)
+
+        if not sheet_name in wb_source.sheetnames:
+            return
+
+        source = wb_source[sheet_name]
+        target = wb_target[sheet_name]
+
+        for row in source.iter_rows():
+            for cell in row:
+                target_cell = target.cell(row=cell.row, column=cell.column)
+
+                if cell.has_style:
+                    target_cell.font = copy(cell.font)
+                    target_cell.border = copy(cell.border)
+                    target_cell.fill = copy(cell.fill)
+                    target_cell.number_format = copy(cell.number_format)
+                    target_cell.protection = copy(cell.protection)
+                    target_cell.alignment = copy(cell.alignment)
+
+        if sheet_name in ["site", "cr", "dt", "survey"]:
+            fixed_width = 43
+            for col_idx in range(1, target.max_column + 1):
+                col_letter = get_column_letter(col_idx)
+                if col_letter in target.column_dimensions:
+                    del target.column_dimensions[col_letter]  # remove old dimension
+                target.column_dimensions[col_letter].width = fixed_width
+        else:
+            max_cols = max(source.max_column, target.max_column)
+
+            for col_idx in range(1, max_cols + 1):
+                source_letter = get_column_letter(col_idx)
+                target_letter = get_column_letter(col_idx)
+
+                if source_letter in source.column_dimensions:
+                    source_width = source.column_dimensions[source_letter].width
+                    if source_width is not None:
+                        target.column_dimensions[target_letter].width = source_width
+
+        # Copy merged cells
+        for merged in source.merged_cells.ranges:
+            try:
+                target.merge_cells(str(merged))
+            except ValueError:
+                # skip if the merged range doesn't fit target sheet
+                pass
+
+        wb_target.save(target_file)
+
 
     def write_form(
-        self, data: dict[str, None] | dict[str, GeoDataFrame], target_file: str
+        self, source_file: str, data: dict[str, None] | dict[str, GeoDataFrame], target_file: str
     ):
+        source = pd.read_excel(source_file, sheet_name=None)
+
         with ExcelWriter(target_file, "openpyxl") as excel_writer:
+            readme = source["README"].copy()
+            readme.columns = [""] * len(readme.columns)
+            readme.to_excel(
+                excel_writer, sheet_name="README", index=False, header=True
+            )
+
             sites: GeoDataFrame = data["sites"]
+
             sites["unique_site_id"] = (
                 sites["short_site_id"]
                 + "-"
@@ -265,7 +227,7 @@ class Outputter:
                     "special_requests": "Willing to consider special requests",
                     "responsible_organization": "Responsible Organization",
                     "website": "Website",
-                    "active_from": "Active from (YYYY-MM-DD)",
+                    "active_from": "Active from  (YYYY-MM-DD)",
                     "active_until": 'Active until (YYYY-MM-DD or "-")',
                     "poc_name": "POC Name",
                     "poc_email": "POC email",
@@ -279,13 +241,16 @@ class Outputter:
                 inplace=True,
             )
 
-            sites.to_excel(
-                excel_writer, sheet_name="site", columns=self.sites_columns, index=False
+            source_sites = source["site"].iloc[:4]
+            sites_merged = pd.concat([source_sites, sites.reindex(columns=source_sites.columns)], ignore_index=True)
+
+            sites_merged.to_excel(
+                excel_writer, sheet_name="site", index=False
             )
             targets: GeoDataFrame = data["targets"]
-            targets["operational"] = targets["operational"].replace({True: "Y", False: "N"})
-            targets["rcs_angle_dependency_availability"] = targets["rcs_angle_dependency_availability"].replace({True: "Y", False: "N"})
-            if targets is not None:
+            if len(targets) > 0:
+                targets["operational"] = targets["operational"].replace({True: "Y", False: "N"})
+                targets["rcs_angle_dependency_availability"] = targets["rcs_angle_dependency_availability"].replace({True: "Y", False: "N"})
                 targets.rename(
                     columns={
                         "target_id": "Unique Target ID",
@@ -297,10 +262,10 @@ class Outputter:
                         "target_type": "Target Type ID",
                         "target_description": "Target description",
                         "approx_lat": "Approximate Latitude\n(decimal deg, WGS84)",
-                        "approx_lon": "Approximate Longitude\n(decimal deg, WGS84)",
+                        "approx_lon": "Approximate Longitude\n(decimal deg WGS84)",
                         "approx_h": "Approximate elevation\n(meters, WGS84)",
-                        "approx_azimuth_angle": "Approximate Azimuth angle\n(decimal deg)",
-                        "approx_boresight_angle": "Approximate Boresight angle\n(decimal deg)",
+                        "approx_azimuth_angle": "Approximate Boresight Azimuth angle\n(decimal deg)",
+                        "approx_boresight_angle": "Approximate Boresight Elevation angle\n(decimal deg)",
                         "primary_direction": "Primary direction",
                         "side_length": "Side length (m)",
                         "photo_link": "Photo link",
@@ -320,12 +285,15 @@ class Outputter:
                     },
                     inplace=True,
                 )
+                source_targets = source["cr"].iloc[:4]
+                targets = pd.concat([source_targets, targets.reindex(columns=source_targets.columns)], ignore_index=True)
                 targets.to_excel(
-                    excel_writer, sheet_name="cr", columns=self.cr_columns, index=False
+                    excel_writer, sheet_name="cr", index=False
                 )
+
             surveys: GeoDataFrame = data["surveys"]
-            surveys["fence"] = surveys["fence"].replace({True: "Y", False: "N"})
-            if surveys is not None:
+            if len(surveys) > 0:
+                surveys["fence"] = surveys["fence"].replace({True: "Y", False: "N"})
                 surveys.rename(
                     columns={
                         "target_id": "Unique Target ID",
@@ -338,8 +306,8 @@ class Outputter:
                         "crs_vx": "CRS X velocity (mm/year)",
                         "crs_vy": "CRS Y velocity (mm/year)",
                         "crs_vz": "CRS Z velocity (mm/year)",
-                        "azimuth_angle": "Azimuth angle\n(decimal deg)",
-                        "boresight_angle": "Boresight angle\n(decimal deg)",
+                        "azimuth_angle": "Boresight azimuth angle\n(decimal deg)",
+                        "boresight_angle": "Boresight elevation angle\n(decimal deg)",
                         "tilt_angle": "Tilt (decimal deg)",
                         "pointing_accuracy": "Pointing accuracy\n(decimal deg)",
                         "fence": "Fence",
@@ -352,14 +320,14 @@ class Outputter:
                     },
                     inplace=True,
                 )
+
+                source_surveys = source["survey"].iloc[:4]
+                surveys = pd.concat([source_surveys, surveys.reindex(columns=source_surveys.columns)], ignore_index=True)
                 surveys.to_excel(
-                    excel_writer,
-                    sheet_name="surveys",
-                    columns=self.survey_columns,
-                    index=False,
+                    excel_writer, sheet_name="survey", index=False
                 )
             nat_targets: GeoDataFrame = data["nat_targets"]
-            if nat_targets is not None:
+            if nat_targets is not None and "dt" in source.keys():
                 nat_targets.rename(
                     columns={
                         "target_id": "Unique Target ID",
@@ -378,14 +346,12 @@ class Outputter:
                     },
                     inplace=True,
                 )
+                source_nat_targets = source["dt"].iloc[:4]
+                nat_targets = pd.concat([source_nat_targets, nat_targets.reindex(columns=source_nat_targets.columns)], ignore_index=True)
                 nat_targets.to_excel(
-                    excel_writer, sheet_name="dt", columns=self.dt_columns, index=False
+                    excel_writer, sheet_name="dt", index=False
                 )
             nat_surveys: GeoDataFrame = data["nat_surveys"]
-            if "surveys" in excel_writer.sheets:
-                sheet_name = "nat_surveys"
-            else:
-                sheet_name = "surveys"
             if nat_surveys is not None:
                 nat_surveys.rename(
                     columns={
@@ -413,15 +379,46 @@ class Outputter:
                     },
                     inplace=True,
                 )
+
+                source_nat_surveys = source["survey"].iloc[:4]
+                nat_surveys = pd.concat([source_nat_surveys, nat_surveys.reindex(columns=source_nat_surveys.columns)], ignore_index=True)
+                nat_surveys.to_excel(
+                    excel_writer, sheet_name="dt", index=False
+                )
+
                 nat_surveys.to_excel(
                     excel_writer,
-                    sheet_name=sheet_name,
-                    columns=self.nat_survey_columns,
+                    sheet_name="survey",
                     index=False,
                 )
 
 
+            if "unavailability (optional)" in source.keys():
+                unavailability = source["unavailability (optional)"].copy()
+                unavailability.to_excel(
+                    excel_writer, sheet_name="unavailability (optional)", index=False
+                )
+
+            if "definitions" in source.keys():
+                definitions = source["definitions"].copy()
+                definitions.columns = [""] * len(definitions.columns)
+                source["definitions"].to_excel(
+                    excel_writer, sheet_name="definitions", index=False, header=False
+                )
+        self.copy_sheet_formatting(source_file, "README", target_file)
+        self.copy_sheet_formatting(source_file, "site", target_file)
+        self.copy_sheet_formatting(source_file, "cr", target_file)
+        self.copy_sheet_formatting(source_file, "dt", target_file)
+        self.copy_sheet_formatting(source_file, "survey", target_file)
+        self.copy_sheet_formatting(source_file, "unavailability (optional)", target_file)
+        self.copy_sheet_formatting(source_file, "definitions", target_file)
+
+
 @click.command()
+@click.argument(
+    "source_file",
+    metavar="SOURCE_FILE",
+)
 @click.argument(
     "unique_site_id",
     metavar="UNIQUE_SITE_ID",
@@ -444,6 +441,7 @@ class Outputter:
     help="The geoDB auth domain URL.",
 )
 def create_form(
+    source_file: str,
     unique_site_id: str,
     target_file: str,
     client_id: str,
@@ -463,7 +461,8 @@ def create_form(
     data = DataFetcher(geodb).fetch_data([unique_site_id])
     if not target_file.endswith(".xlsx"):
         target_file = target_file + ".xlsx"
-    Outputter().write_form(data, target_file)
+    Outputter().write_form(source_file, data, target_file)
+    print(f"Written filled template to {target_file}.")
 
 
 if __name__ == "__main__":

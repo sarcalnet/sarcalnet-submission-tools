@@ -6,6 +6,7 @@ from typing import Optional, Union
 from unittest.mock import patch
 
 import pandas
+import pandas as pd
 from geopandas import GeoDataFrame
 from pandas import DataFrame
 from xcube_geodb.core.geodb import GeoDBClient
@@ -206,7 +207,7 @@ class TemplateFillerTest(unittest.TestCase):
         self.assertEqual(-7.49, nat_survey_16["backscatter_coeff_mean"][15])
 
     @patch("xcube_geodb.core.geodb.GeoDBClient")
-    def test_outputter(self, mockgc: GeoDBClient):
+    def test_outputter_cr(self, mockgc: GeoDBClient):
         def get_collection_pg(
             collection: str,
             database: str,
@@ -218,6 +219,62 @@ class TemplateFillerTest(unittest.TestCase):
                 return self.read_csv("test_targets.csv")
             elif collection == "calibration_surveys":
                 return self.read_csv("test_surveys.csv")
+            elif collection == "calibration_nat_targets":
+                return GeoDataFrame()
+            elif collection == "calibration_nat_surveys":
+                return GeoDataFrame()
+            else:
+                raise ValueError(f"Unknown collection: {collection}")
+
+        mockgc.get_collection_pg = get_collection_pg
+        is_ci_run = bool(os.getenv("GITHUB_ACTIONS", False))
+        if is_ci_run:
+            tempdir = os.path.join(os.environ["RUNNER_TEMP"], "processing")
+        else:
+            tempdir = "./scn_db_tools/test/res"
+        temp_source = os.path.join(tempdir, os.urandom(10).hex() + ".xlsx")
+        temp_target = os.path.join(tempdir, os.urandom(10).hex() + ".xlsx")
+        data = DataFetcher(mockgc).fetch_data(["VISB-AT", "GNLD-DT"])
+        cr_template_bytes = pkgutil.get_data("scn_db_tools.test.res", "cr_template_v1.5.0.xlsx")
+        with open(temp_source, "wb") as f:
+            f.write(cr_template_bytes)
+        try:
+            Outputter().write_form(
+                temp_source,
+                data,
+                temp_target,
+            )
+            sites = pandas.read_excel(temp_target, "site")
+            self.assertEqual(
+                "Greenland",
+                sites["Site Name"][4],
+            )
+            self.assertEqual(
+                "Visby",
+                sites["Site Name"][5],
+            )
+            cr = pandas.read_excel(temp_target, "cr")
+            self.assertEqual(36.8, cr["Reference RCS (dBm2)"][4])
+            self.assertEqual(34.2, cr["Reference RCS (dBm2)"][5])
+            surveys = pandas.read_excel(temp_target, "survey")
+            self.assertEqual(53.453, surveys["Elevation (m)"][4])
+            self.assertEqual(53.4422, surveys["Elevation (m)"][5])
+        finally:
+            os.remove(temp_target)
+
+    @patch("xcube_geodb.core.geodb.GeoDBClient")
+    def test_outputter_dt(self, mockgc: GeoDBClient):
+        def get_collection_pg(
+            collection: str,
+            database: str,
+            where: Optional[str] = None,
+        ) -> Union[GeoDataFrame, DataFrame, None]:
+            if collection == "calibration_sites":
+                return self.read_csv("test_sites.csv")
+            elif collection == "calibration_targets":
+                return GeoDataFrame()
+            elif collection == "calibration_surveys":
+                return GeoDataFrame()
             elif collection == "calibration_nat_targets":
                 return self.read_csv("test_nat_targets.csv")
             elif collection == "calibration_nat_surveys":
@@ -231,33 +288,35 @@ class TemplateFillerTest(unittest.TestCase):
             tempdir = os.path.join(os.environ["RUNNER_TEMP"], "processing")
         else:
             tempdir = "./scn_db_tools/test/res"
-        temp_file = os.path.join(tempdir, os.urandom(10).hex() + ".xlsx")
+        temp_source = os.path.join(tempdir, os.urandom(10).hex() + ".xlsx")
+        temp_target = os.path.join(tempdir, os.urandom(10).hex() + ".xlsx")
         data = DataFetcher(mockgc).fetch_data(["VISB-AT", "GNLD-DT"])
+        cr_template_bytes = pkgutil.get_data("scn_db_tools.test.res", "dt_template_v1.1.2.xlsx")
+        with open(temp_source, "wb") as f:
+            f.write(cr_template_bytes)
         try:
             Outputter().write_form(
+                temp_source,
                 data,
-                temp_file,
+                temp_target,
             )
-            sites = pandas.read_excel(temp_file, "site")
+            sites = pandas.read_excel(temp_target, "site")
             self.assertEqual(
                 "Greenland",
-                sites["Site Name"][0],
+                sites["Site Name"][4],
             )
             self.assertEqual(
                 "Visby",
-                sites["Site Name"][1],
+                sites["Site Name"][5],
             )
-            cr = pandas.read_excel(temp_file, "cr")
-            self.assertEqual(36.8, cr["Reference RCS (dBm2)"][0])
-            self.assertEqual(34.2, cr["Reference RCS (dBm2)"][1])
-            dt = pandas.read_excel(temp_file, "dt")
-            self.assertEqual("79.1496N_39.2962W_drySnow", dt["Internal ID"][0])
-            self.assertEqual("73.6711N_39.8741W_drySnow", dt["Internal ID"][15])
-            surveys = pandas.read_excel(temp_file, "surveys")
-            self.assertEqual(53.453, surveys["Elevation (m)"][0])
-            self.assertEqual(53.4422, surveys["Elevation (m)"][1])
+            dt = pandas.read_excel(temp_target, "dt")
+            self.assertEqual("HH", dt["Polarization Channel"][4])
+            self.assertEqual("VV", dt["Polarization Channel"][19])
+            surveys = pandas.read_excel(temp_target, "survey")
+            self.assertEqual(0.24, surveys["Backscatter Coefficient Standard Deviation (dB)"][4])
+            self.assertEqual(0.14, surveys["Backscatter Coefficient Standard Deviation (dB)"][19])
         finally:
-            os.remove(temp_file)
+            os.remove(temp_target)
 
     @staticmethod
     def read_csv(csv) -> DataFrame:
