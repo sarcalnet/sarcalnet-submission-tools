@@ -113,7 +113,7 @@ class Ingester:
         sites_df = sites_df.apply(self.compute_centroid_from_boundaries, axis=1)
 
         self.validate_sites(sites_df)
-        print("Sites validation successful.")
+        print(f"Validation of {len(sites_df)} site(s) successful.")
         if self.validation_mode:
             return None
 
@@ -391,7 +391,7 @@ class Ingester:
         targets_df = targets_df.replace(to_replace="-", value=None)
 
         self.validate_nat_targets(targets_df)
-        print("Targets validation successful.")
+        print(f"Validation of {len(targets_df)} natural target(s) successful.")
         if self.validation_mode:
             return
 
@@ -449,7 +449,9 @@ class Ingester:
                 "Approximate Longitude\n(decimal deg, WGS84)": "approx_lon",
                 "Approximate elevation\n(meters, WGS84)": "approx_h",
                 "Approximate Azimuth angle\n(decimal deg)": "approx_azimuth_angle",
+                "Approximate Boresight Azimuth angle\n(decimal deg)": "approx_azimuth_angle",
                 "Approximate Boresight angle\n(decimal deg)": "approx_boresight_angle",
+                "Approximate Boresight Elevation angle\n(decimal deg)": "approx_boresight_angle",
                 "Primary direction": "primary_direction",
                 "Side length (m)": "side_length",
                 "Photo link": "photo_link",
@@ -464,6 +466,7 @@ class Ingester:
                 "Reference RCS measurement bandwidth (Hz)": "reference_rcs_bandwidth",
                 "RCS accuracy determination method": "rcs_accuracy_determination",
                 "RCS angle dependency availablity": "rcs_angle_dependency_availability",
+                "RCS angle dependency availability": "rcs_angle_dependency_availability",
                 "Composition": "composition",
                 "Characterization of reflector ": "characterization",
                 "Characterization of reflector": "characterization",
@@ -475,7 +478,7 @@ class Ingester:
         targets_df = targets_df.replace(math.nan, None)
 
         self.validate_art_targets(targets_df)
-        print("Targets validation successful.")
+        print(f"Validation of {len(targets_df)} artificial target(s) successful.")
         if self.validation_mode:
             return
 
@@ -538,8 +541,8 @@ class Ingester:
                     or str(row[1][col]) == "None"
                 ):
                     message = (
-                        f"cr, row {row[0] + 6}: missing entry for mandatory field "
-                        f"'{col}'. Please fill in all mandatory fields, "
+                        f"cr, row {row[0] + 6}: missing entry for mandatory field " +
+                        f"'{col}'. Please fill in all mandatory fields, " +
                         f"or remove the entire row."
                     )
                     if self.validation_mode:
@@ -549,16 +552,16 @@ class Ingester:
             try:
                 float(row[1]["approx_lat"])
             except ValueError:
-                message = f"cr, row {row[0] + 6}: invalid entry for mandatory field "
-                f"'Approximate Latitude'. Please enter a valid "
+                message = f"cr, row {row[0] + 6}: invalid entry {row[1]["approx_lat"]} for mandatory field " + \
+                f"'Approximate Latitude'. Please enter a valid " + \
                 f"floating point number."
                 if self.validation_mode:
                     print(message)
                 else:
                     raise ValueError(message)
             if row[1]["approx_lat"] < -90 or row[1]["approx_lat"] > 90:
-                message = f"cr, row {row[0] + 6}: invalid entry for mandatory field "
-                f"'Approximate Latitude'. Please enter a valid "
+                message = f"cr, row {row[0] + 6}: invalid entry {row[1]["approx_lat"]} for mandatory field " + \
+                f"'Approximate Latitude'. Please enter a valid " + \
                 f"floating point number > -90 and < 90. "
                 if self.validation_mode:
                     print(message)
@@ -647,9 +650,16 @@ class Ingester:
                 else:
                     raise ValueError(message)
             try:
+                raise_message = False
+                try:
+                    if row[1]["reference_rcs_wavelength"]:
+                        float(row[1]["reference_rcs_wavelength"])
+                except:
+                    raise_message = True
                 if (
-                    row[1]["reference_rcs_wavelength"]
-                    and row[1]["reference_rcs_wavelength"] <= 0
+                    raise_message or
+                    row[1]["reference_rcs_wavelength"] and
+                    float(row[1]["reference_rcs_wavelength"]) <= 0
                 ):
                     raise ValueError
             except ValueError:
@@ -786,7 +796,7 @@ class Ingester:
         surveys_df = surveys_df.replace(math.nan, None)
 
         self.validate_nat_surveys(surveys_df)
-        print("Successfully validated surveys.")
+        print(f"Successfully validated {len(surveys_df)} natural surveys.")
         if self.validation_mode:
             return None
 
@@ -830,6 +840,8 @@ class Ingester:
                 "CRS Y velocity (mm/year)": "crs_vy",
                 "CRS Z velocity (mm/year)": "crs_vz",
                 "Azimuth angle\n(decimal deg)": "azimuth_angle",
+                "Boresight azimuth angle\n(decimal deg)": "azimuth_angle",
+                "Boresight elevation angle\n(decimal deg)": "boresight_angle",
                 "Boresight angle\n(decimal deg)": "boresight_angle",
                 "Tilt (decimal deg)": "tilt_angle",
                 "Pointing accuracy\n(decimal deg)": "pointing_accuracy",
@@ -853,11 +865,12 @@ class Ingester:
         surveys_df = surveys_df.dropna(axis=0, how="all")
 
         self.validate_art_surveys(surveys_df)
-        print("Surveys validation successful.")
+        print(f"Validation of {len(surveys_df)} artificial survey(s) successful.")
         if self.validation_mode:
             return None
 
         surveys_df = surveys_df.replace(to_replace="not applicable", value=None)
+        surveys_df = surveys_df.drop(columns=["Cartesian x cooridnate [m]", "Cartesian y cooridnate [m]", "Cartesian z cooridnate [m]"])
 
         surveys_df.insert(len(surveys_df.columns), "geometry", "POINT(0 0)")
         surveys_df["geometry"] = gpd.GeoSeries.from_wkt(surveys_df["geometry"])
@@ -1038,7 +1051,12 @@ class Ingester:
             self.validate_duration(row)
 
     def validate_lat(self, row):
-        if row[1]["lat"] < -90 or row[1]["lat"] > 90:
+        raise_message = False
+        try:
+            float(row[1]["lat"])
+        except:
+            raise_message = True
+        if raise_message or float(row[1]["lat"]) < -90 or float(row[1]["lat"]) > 90:
             message = (
                 f"surveys, row {row[0] + 6}: invalid entry '{row[1]['lat']}' "
                 f"for mandatory field 'Latitude (decimal deg)'. Please enter a "
@@ -1050,7 +1068,12 @@ class Ingester:
                 raise ValueError(message)
 
     def validate_lon(self, row):
-        if row[1]["lon"] < -180 or row[1]["lon"] > 180:
+        raise_message = False
+        try:
+            float(row[1]["lat"])
+        except:
+            raise_message = True
+        if raise_message or float(row[1]["lon"]) < -180 or float(row[1]["lon"]) > 180:
             message = (
                 f"surveys, row {row[0] + 6}: invalid entry '{row[1]['lon']}' "
                 f"for mandatory field 'Longitude (decimal deg)'. Please enter a "
@@ -1194,7 +1217,7 @@ class Ingester:
         )
         try:
             float(row[1]["pointing_accuracy"])
-        except ValueError:
+        except ValueError | TypeError:
             if self.validation_mode:
                 print(message)
                 return
