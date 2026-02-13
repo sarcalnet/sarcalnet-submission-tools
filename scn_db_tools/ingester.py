@@ -501,8 +501,8 @@ class Ingester:
                 {"unavailability_start": list, "unavailability_end": list}
             )
             targets_df.merge(unavailability, on="target_id", how="left")
-            targets_df = targets_df.replace(math.nan, None)
 
+        targets_df = targets_df.astype(object).where(targets_df.notna(), None)
         gdf = gpd.GeoDataFrame(
             targets_df,
             geometry=gpd.points_from_xy(targets_df.approx_lon, targets_df.approx_lat),
