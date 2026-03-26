@@ -387,8 +387,8 @@ class Ingester:
             errors="ignore",
         )
         targets_df = targets_df[targets_df["target_id"] != "--"]
-        targets_df = targets_df.replace(math.nan, None)
         targets_df = targets_df.replace(to_replace="-", value=None)
+        targets_df = targets_df.replace({np.nan: None})
 
         self.validate_nat_targets(targets_df)
         print(f"Validation of {len(targets_df)} natural target(s) successful.")
@@ -414,7 +414,6 @@ class Ingester:
             "target_type",
             "geometry",
             "start_monitoring",
-            "stop_monitoring",
         ]
         for row in nat_targets_df.iterrows():
             for col in mandatory_fields:
@@ -475,7 +474,7 @@ class Ingester:
             errors="ignore",
         )
         targets_df = targets_df[targets_df["target_id"] != "--"]
-        targets_df = targets_df.replace(math.nan, None)
+        targets_df = targets_df.replace(np.nan, None)
 
         self.validate_art_targets(targets_df)
         print(f"Validation of {len(targets_df)} artificial target(s) successful.")
@@ -793,7 +792,7 @@ class Ingester:
         )
 
         surveys_df = surveys_df[surveys_df["target_id"] != ""]
-        surveys_df = surveys_df.replace(math.nan, None)
+        surveys_df = surveys_df.replace(np.nan, None)
 
         self.validate_nat_surveys(surveys_df)
         print(f"Successfully validated {len(surveys_df)} natural surveys.")
@@ -860,7 +859,7 @@ class Ingester:
 
         surveys_df = surveys_df[surveys_df["target_id"] != ""]
         surveys_df = surveys_df[surveys_df.target_id.notnull()]
-        surveys_df = surveys_df.replace(math.nan, None)
+        surveys_df = surveys_df.astype(object).where(surveys_df.notna(), None)
         surveys_df["elevation"] = surveys_df["elevation"].astype(float)
         surveys_df = surveys_df.dropna(axis=0, how="all")
 
@@ -876,12 +875,14 @@ class Ingester:
         surveys_df["geometry"] = gpd.GeoSeries.from_wkt(surveys_df["geometry"])
         return gpd.GeoDataFrame(surveys_df, geometry="geometry", crs=4326)
 
-    def upload_photos(self, df: DataFrame):
+    def upload_photos(self, df: DataFrame) -> None:
         folder_id = self.get_folder_id("ext_pictures")
 
         for i, row in df.iterrows():
             if row["photo_link"]:
                 photo_link = row["photo_link"]
+                if not type(photo_link) == str:
+                    continue
                 if photo_link.startswith("http"):
                     a = urllib.parse.urlparse(photo_link)
                     filename = os.path.basename(a.path)
@@ -1121,6 +1122,8 @@ class Ingester:
 
     def validate_duration(self, row):
         try:
+            if row[1]["gnss_measurement_duration"] is None:
+                raise ValueError
             duration_parts = row[1]["gnss_measurement_duration"].split(":")
             if len(duration_parts) != 3:
                 raise ValueError
@@ -1131,13 +1134,11 @@ class Ingester:
             message = (
                 f"surveys, row {row[0] + 6}: invalid entry for field "
                 f"'GNSS measurement duration (hh:mm:ss)'."
-                f" Please provide a time expressed "
-                f"in hh:mm:ss format."
+                f" Using fill value 00:00:00 instead."
             )
-            if self.validation_mode:
-                print(message)
-            else:
-                raise ValueError(message)
+            print(message)
+            if not self.validation_mode:
+                row[1]["gnss_measurement_duration"] = "00:00:00"
 
     def validate_tilt_angle(self, row):
         message = (
@@ -1217,7 +1218,7 @@ class Ingester:
         )
         try:
             float(row[1]["pointing_accuracy"])
-        except ValueError | TypeError:
+        except (ValueError, TypeError):
             if self.validation_mode:
                 print(message)
                 return
