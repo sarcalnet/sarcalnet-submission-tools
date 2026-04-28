@@ -19,7 +19,7 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
 import warnings
-from typing import List
+from typing import List, Tuple
 
 import click
 import pandas as pd
@@ -420,10 +420,6 @@ class Outputter:
     metavar="SOURCE_FILE",
 )
 @click.argument(
-    "unique_site_id",
-    metavar="UNIQUE_SITE_ID",
-)
-@click.argument(
     "target_file",
     metavar="TARGET_FILE",
 )
@@ -440,15 +436,20 @@ class Outputter:
     default="https://winchester.production.brockmann-consult.de/winchester",
     help="The geoDB auth domain URL.",
 )
+@click.argument(
+    "unique_site_ids",
+    metavar="UNIQUE_SITE_IDS",
+    nargs=-1
+)
 def create_form(
     source_file: str,
-    unique_site_id: str,
     target_file: str,
     client_id: str,
     client_secret: str,
     server_url: str,
     server_port: int,
     auth_domain: str,
+    unique_site_ids: Tuple[str],
 ):
     """
     Creates a filled template from the information of the SARCalNet database.
@@ -458,7 +459,7 @@ def create_form(
     geodb = GeoDBClient(
         server_url, server_port, client_id, client_secret, auth_domain=auth_domain
     )
-    data = DataFetcher(geodb).fetch_data([unique_site_id])
+    data = DataFetcher(geodb).fetch_data(list(unique_site_ids))
     if not target_file.endswith(".xlsx"):
         target_file = target_file + ".xlsx"
     Outputter().write_form(source_file, data, target_file)
