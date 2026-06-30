@@ -19,14 +19,19 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
 import warnings
+import zipfile
+from pathlib import PurePosixPath
 from typing import List, Tuple
+from xml.etree import ElementTree
 
 import click
 import pandas as pd
 from geopandas import GeoDataFrame
 from openpyxl import load_workbook
+from openpyxl.worksheet.datavalidation import DataValidation
+from openpyxl.worksheet.cell_range import CellRange, MultiCellRange
 from openpyxl.utils import get_column_letter
-from copy import copy
+from copy import copy, deepcopy
 from pandas import ExcelWriter
 from xcube_geodb.core.geodb import GeoDBClient
 
@@ -125,17 +130,122 @@ class DataFetcher:
 
 
 class Outputter:
+    FIRST_DATA_ROW = 6
+    MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    PACKAGE_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
+    X14_NS = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"
+    XM_NS = "http://schemas.microsoft.com/office/excel/2006/main"
+
+    @staticmethod
+    def copy_cell_formatting(source_cell, target_cell):
+        if source_cell.has_style:
+            target_cell.font = copy(source_cell.font)
+            target_cell.border = copy(source_cell.border)
+            target_cell.fill = copy(source_cell.fill)
+            target_cell.number_format = copy(source_cell.number_format)
+            target_cell.protection = copy(source_cell.protection)
+            target_cell.alignment = copy(source_cell.alignment)
+
+    @staticmethod
+    def extend_data_validation_ranges(data_validation, max_row):
+        # Pandas may write more data rows than the template originally covered.
+        # Keep single-cell rules untouched, but extend row-based data-entry rules
+        # so dropdowns and constraints also apply to appended rows.
+        extended_ranges = MultiCellRange()
+        for cell_range in data_validation.sqref.ranges:
+            extended_range = CellRange(str(cell_range))
+            if (
+                extended_range.min_row >= Outputter.FIRST_DATA_ROW
+                and extended_range.max_row > extended_range.min_row
+            ):
+                extended_range.max_row = max(extended_range.max_row, max_row)
+            extended_ranges.add(extended_range)
+        data_validation.sqref = extended_ranges
+
+    @staticmethod
+    def get_sheet_xml_path(workbook_archive, sheet_name):
+        # XLSX files store worksheets as numbered XML files. Resolve the visible
+        # sheet name through workbook.xml and its relationship file so we can read
+        # the raw worksheet XML for features openpyxl drops while loading.
+        workbook = ElementTree.fromstring(workbook_archive.read("xl/workbook.xml"))
+        workbook_rels = ElementTree.fromstring(
+            workbook_archive.read("xl/_rels/workbook.xml.rels")
+        )
+        rel_targets = {
+            relationship.attrib["Id"]: relationship.attrib["Target"]
+            for relationship in workbook_rels.findall(
+                f"{{{Outputter.PACKAGE_REL_NS}}}Relationship"
+            )
+        }
+
+        for sheet in workbook.find(f"{{{Outputter.MAIN_NS}}}sheets"):
+            if sheet.attrib["name"] == sheet_name:
+                rel_id = sheet.attrib[f"{{{Outputter.REL_NS}}}id"]
+                target = rel_targets[rel_id]
+                if target.startswith("/"):
+                    return target.lstrip("/")
+                return str(PurePosixPath("xl") / target)
+
+        return None
+
+    @staticmethod
+    def get_x14_data_validations(source_file, sheet_name):
+        # Some Excel dropdown validations are stored in the newer x14 extension
+        # namespace. openpyxl warns about these and removes them, so read them
+        # from the raw XML and recreate equivalent standard DataValidation rules.
+        with zipfile.ZipFile(source_file) as workbook_archive:
+            sheet_xml_path = Outputter.get_sheet_xml_path(workbook_archive, sheet_name)
+            if sheet_xml_path is None:
+                return []
+
+            sheet_root = ElementTree.fromstring(workbook_archive.read(sheet_xml_path))
+
+        validations = []
+        namespaces = {
+            "x14": Outputter.X14_NS,
+            "xm": Outputter.XM_NS,
+        }
+        for data_validation in sheet_root.findall(".//x14:dataValidation", namespaces):
+            formula = data_validation.find("x14:formula1/xm:f", namespaces)
+            sqref = data_validation.find("xm:sqref", namespaces)
+            if formula is None or sqref is None:
+                continue
+
+            validation = DataValidation(
+                type=data_validation.attrib.get("type"),
+                formula1=formula.text,
+                allow_blank=data_validation.attrib.get("allowBlank") == "1",
+                showInputMessage=data_validation.attrib.get("showInputMessage") != "0",
+                showErrorMessage=data_validation.attrib.get("showErrorMessage") != "0",
+            )
+            for cell_range in sqref.text.split():
+                validation.add(cell_range)
+            validations.append(validation)
+
+        return validations
+
+    @staticmethod
+    def copy_data_validations(source_file, sheet_name, source, target):
+        target.data_validations = deepcopy(source.data_validations)
+
+        for data_validation in target.data_validations.dataValidation:
+            Outputter.extend_data_validation_ranges(data_validation, target.max_row)
+
+        for data_validation in Outputter.get_x14_data_validations(source_file, sheet_name):
+            Outputter.extend_data_validation_ranges(data_validation, target.max_row)
+            target.add_data_validation(data_validation)
 
     @staticmethod
     def copy_sheet_formatting(source_file, sheet_name, target_file):
         """
-        Copy formatting from one sheet in source_file to a sheet in target_file,
-        keeping the target values unchanged.
+        Copy formatting and formulas from one sheet in source_file to a sheet in
+        target_file, keeping all non-formula target values unchanged.
 
         Parameters
         ----------
         source_file : str
-            Path to the source Excel file (contains formatting to copy).
+            Path to the source Excel file (contains formatting and formulas to copy).
         sheet_name : str
             Name of the sheet in the source file to copy formatting from.
         target_file : str
@@ -144,6 +254,7 @@ class Outputter:
         # Load workbooks
         wb_source = load_workbook(source_file)
         wb_target = load_workbook(target_file)
+        wb_target.loaded_theme = wb_source.loaded_theme
 
         if not sheet_name in wb_source.sheetnames:
             return
@@ -151,17 +262,28 @@ class Outputter:
         source = wb_source[sheet_name]
         target = wb_target[sheet_name]
 
-        for row in source.iter_rows():
-            for cell in row:
-                target_cell = target.cell(row=cell.row, column=cell.column)
+        max_rows = max(source.max_row, target.max_row)
+        for row_idx in range(1, max_rows + 1):
+            source_row_idx = min(row_idx, source.max_row)
+            source_row_dimension = source.row_dimensions[source_row_idx]
+            target_row_dimension = target.row_dimensions[row_idx]
+            target_row_dimension.height = source_row_dimension.height
+            target_row_dimension.hidden = source_row_dimension.hidden
+            target_row_dimension.outlineLevel = source_row_dimension.outlineLevel
+            target_row_dimension.collapsed = source_row_dimension.collapsed
 
-                if cell.has_style:
-                    target_cell.font = copy(cell.font)
-                    target_cell.border = copy(cell.border)
-                    target_cell.fill = copy(cell.fill)
-                    target_cell.number_format = copy(cell.number_format)
-                    target_cell.protection = copy(cell.protection)
-                    target_cell.alignment = copy(cell.alignment)
+            for col_idx in range(1, source.max_column + 1):
+                source_cell = source.cell(row=source_row_idx, column=col_idx)
+                target_cell = target.cell(row=row_idx, column=col_idx)
+
+                Outputter.copy_cell_formatting(source_cell, target_cell)
+
+                if (
+                    row_idx <= source.max_row
+                    and isinstance(source_cell.value, str)
+                    and source_cell.value.startswith("=")
+                ):
+                    target_cell.value = source_cell.value
 
         if sheet_name in ["site", "cr", "dt", "survey"]:
             fixed_width = 43
@@ -170,6 +292,10 @@ class Outputter:
                 if col_letter in target.column_dimensions:
                     del target.column_dimensions[col_letter]  # remove old dimension
                 target.column_dimensions[col_letter].width = fixed_width
+                if col_letter in source.column_dimensions:
+                    target.column_dimensions[col_letter].hidden = source.column_dimensions[col_letter].hidden
+                    target.column_dimensions[col_letter].outlineLevel = source.column_dimensions[col_letter].outlineLevel
+                    target.column_dimensions[col_letter].collapsed = source.column_dimensions[col_letter].collapsed
         else:
             max_cols = max(source.max_column, target.max_column)
 
@@ -181,6 +307,9 @@ class Outputter:
                     source_width = source.column_dimensions[source_letter].width
                     if source_width is not None:
                         target.column_dimensions[target_letter].width = source_width
+                    target.column_dimensions[target_letter].hidden = source.column_dimensions[source_letter].hidden
+                    target.column_dimensions[target_letter].outlineLevel = source.column_dimensions[source_letter].outlineLevel
+                    target.column_dimensions[target_letter].collapsed = source.column_dimensions[source_letter].collapsed
 
         # Copy merged cells
         for merged in source.merged_cells.ranges:
@@ -189,6 +318,15 @@ class Outputter:
             except ValueError:
                 # skip if the merged range doesn't fit target sheet
                 pass
+
+        target.conditional_formatting._cf_rules.clear()
+        for conditional_formatting, rules in source.conditional_formatting._cf_rules.items():
+            for rule in rules:
+                target.conditional_formatting.add(
+                    str(conditional_formatting.sqref), deepcopy(rule)
+                )
+
+        Outputter.copy_data_validations(source_file, sheet_name, source, target)
 
         wb_target.save(target_file)
 
@@ -400,10 +538,8 @@ class Outputter:
                 )
 
             if "definitions" in source.keys():
-                definitions = source["definitions"].copy()
-                definitions.columns = [""] * len(definitions.columns)
                 source["definitions"].to_excel(
-                    excel_writer, sheet_name="definitions", index=False, header=False
+                    excel_writer, sheet_name="definitions", index=False, header=True
                 )
         self.copy_sheet_formatting(source_file, "README", target_file)
         self.copy_sheet_formatting(source_file, "site", target_file)
