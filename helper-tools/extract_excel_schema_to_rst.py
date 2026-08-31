@@ -26,12 +26,20 @@
 import argparse
 import re
 from pathlib import Path
+from typing import NamedTuple
 
 from openpyxl import load_workbook
 
+class FieldInfoRows(NamedTuple):
+    title: int = 1
+    field_id: int = 2
+    mandatory: int = 3
+    description: int = 4
+    validity_range: int = 5
 
-DEFAULT_SKIP_SHEETS = ("README", "definitions")
 
+DEFAULT_SKIP_SHEETS = frozenset({"README", "definitions"})
+DEFAULT_INFO_ROWS = FieldInfoRows()
 
 def cell_text(value):
     if value is None:
@@ -94,31 +102,31 @@ def parse_args():
     parser.add_argument(
         "--title-row",
         type=int,
-        default=1,
+        default=DEFAULT_INFO_ROWS.title,
         help="Row containing human-readable column titles",
     )
     parser.add_argument(
         "--field-id-row",
         type=int,
-        default=2,
+        default=DEFAULT_INFO_ROWS.field_id,
         help="Row containing field IDs",
     )
     parser.add_argument(
         "--mandatory-row",
         type=int,
-        default=3,
+        default=DEFAULT_INFO_ROWS.mandatory,
         help="Row in which it is specified if a field is mandatory or not",
     )
     parser.add_argument(
         "--description-row",
         type=int,
-        default=4,
+        default=DEFAULT_INFO_ROWS.description,
         help="Row containing the description text",
     )
     parser.add_argument(
         "--validity-range-row",
         type=int,
-        default=5,
+        default=DEFAULT_INFO_ROWS.validity_range,
         help="Row containing the definition of validity ranges",
     )
     try:
@@ -136,13 +144,13 @@ def main():
     output = args.output or Path(f"{source.stem}.rst")
     doc_title = args.title or title_from_source(source)
     skip_sheets = {sheet.casefold() for sheet in args.skip_sheet}
-    summary_rows = {
-        args.title_row,
-        args.field_id_row,
-        args.mandatory_row,
-        args.description_row,
-        args.validity_range_row,
-    }
+    field_info_rows = FieldInfoRows(
+        title=args.title_row,
+        field_id=args.field_id_row,
+        mandatory=args.mandatory_row,
+        description=args.description_row,
+        validity_range=args.validity_range_row,
+    )
 
     wb = load_workbook(source, read_only=True, data_only=False)
 
@@ -160,12 +168,12 @@ def main():
 
         lines.extend([ws.title, underline(ws.title, "-"), ""])
 
-        for col in used_columns(ws, summary_rows):
-            title = cell_text(ws.cell(row=args.title_row, column=col).value)
-            field_id = cell_text(ws.cell(row=args.field_id_row, column=col).value)
-            mandatory = cell_text(ws.cell(row=args.mandatory_row, column=col).value)
-            description = cell_text(ws.cell(row=args.description_row, column=col).value)
-            validity_range = cell_text(ws.cell(row=args.validity_range_row, column=col).value)
+        for col in used_columns(ws, field_info_rows):
+            title = cell_text(ws.cell(row=field_info_rows.title, column=col).value)
+            field_id = cell_text(ws.cell(row=field_info_rows.field_id, column=col).value)
+            mandatory = cell_text(ws.cell(row=field_info_rows.mandatory, column=col).value)
+            description = cell_text(ws.cell(row=field_info_rows.description, column=col).value)
+            validity_range = cell_text(ws.cell(row=field_info_rows.validity_range, column=col).value)
 
             column_title = title or field_id or f"Column {col}"
             lines.extend([column_title, underline(column_title, "~")])
