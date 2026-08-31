@@ -24,11 +24,14 @@
 
 
 import argparse
+import functools
 import re
+from collections.abc import Collection, Iterator
 from pathlib import Path
 from typing import NamedTuple
 
-from openpyxl import load_workbook
+import openpyxl
+
 
 class FieldInfoRows(NamedTuple):
     title: int = 1
@@ -49,10 +52,59 @@ class FieldInfo(NamedTuple):
 DEFAULT_SKIP_SHEETS = frozenset({"README", "definitions"})
 DEFAULT_INFO_ROWS = FieldInfoRows()
 
-def cell_text(value):
-    if value is None:
-        return ""
-    return str(value)
+
+class DataModel:
+    def __init__(
+        self, filename, skip_sheet: Collection[str] = DEFAULT_SKIP_SHEETS
+    ):
+        self._wb = openpyxl.load_workbook(
+            filename,
+            read_only=True,
+            data_only=False,
+        )
+        self._skip_sheets = {sheet.casefold() for sheet in skip_sheet}
+
+    def iter_sections(self) -> Iterator[str]:
+        for title in self._wb.sheetnames:
+            if title.casefold() not in self._skip_sheets:
+                yield title
+
+    @functools.cache  # noqa: B019
+    def _used_columns(self, section: str, rows: FieldInfoRows):
+        ws = self._wb[section]
+        columns = []
+        for col in range(1, ws.max_column + 1):
+            values = [ws.cell(row=row, column=col).value for row in rows]
+            if any(value is not None for value in values):
+                columns.append(col)
+        return columns
+
+    @staticmethod
+    def _cell_text(value):
+        return "" if value is None else str(value)
+
+    def iter_fields(
+        self, section: str, info_rows: FieldInfoRows = DEFAULT_INFO_ROWS,
+    ) -> Iterator[FieldInfo]:
+        ws = self._wb[section]
+        for col in self._used_columns(section, info_rows):
+            yield FieldInfo(
+                title=self._cell_text(
+                    ws.cell(row=info_rows.title, column=col).value
+                ),
+                field_id=self._cell_text(
+                    ws.cell(row=info_rows.field_id, column=col).value
+                ),
+                mandatory=self._cell_text(
+                    ws.cell(row=info_rows.mandatory, column=col).value
+                ),
+                description=self._cell_text(
+                    ws.cell(row=info_rows.description, column=col).value
+                ),
+                validity_range=self._cell_text(
+                    ws.cell(row=info_rows.validity_range, column=col).value
+                ),
+            )
 
 
 def underline(title, char):
@@ -71,15 +123,6 @@ def literal_block(lines, text):
 def field_block(lines, label, value):
     if value:
         lines.append(f":{label}: {value}")
-
-
-def used_columns(ws, rows):
-    columns = []
-    for col in range(1, ws.max_column + 1):
-        values = [ws.cell(row=row, column=col).value for row in rows]
-        if any(value is not None for value in values):
-            columns.append(col)
-    return columns
 
 
 def title_from_source(source):
@@ -160,7 +203,7 @@ def main():
         validity_range=args.validity_range_row,
     )
 
-    wb = load_workbook(source, read_only=True, data_only=False)
+    model = DataModel(source, skip_sheet=skip_sheets)
 
     lines = [
         doc_title,
@@ -170,22 +213,11 @@ def main():
         "",
     ]
 
-    for ws in wb.worksheets:
-        if ws.title.casefold() in skip_sheets:
-            continue
+    for section in model.iter_sections():
+        lines.extend([section, underline(section, "-"), ""])
 
-        lines.extend([ws.title, underline(ws.title, "-"), ""])
-
-        for col in used_columns(ws, field_info_rows):
-            field_info = FieldInfo(
-                title=cell_text(ws.cell(row=field_info_rows.title, column=col).value),
-                field_id=cell_text(ws.cell(row=field_info_rows.field_id, column=col).value),
-                mandatory=cell_text(ws.cell(row=field_info_rows.mandatory, column=col).value),
-                description=cell_text(ws.cell(row=field_info_rows.description, column=col).value),
-                validity_range=cell_text(ws.cell(row=field_info_rows.validity_range, column=col).value),
-            )
-
-            column_title = field_info.title or field_info.field_id or f"Column {col}"
+        for field_info in model.iter_fields(section, info_rows=field_info_rows):
+            column_title = (field_info.title or field_info.field_id)
             lines.extend([column_title, underline(column_title, "~")])
             field_block(lines, "Field name", field_info.field_id)
             field_block(lines, "Required", field_info.mandatory)
