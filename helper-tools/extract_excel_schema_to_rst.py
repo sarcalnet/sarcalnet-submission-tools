@@ -91,6 +91,36 @@ def parse_args():
         default=list(DEFAULT_SKIP_SHEETS),
         help="Sheet name to skip. Can be repeated. Defaults to README and definitions",
     )
+    parser.add_argument(
+        "--title-row",
+        type=int,
+        default=1,
+        help="Row containing human-readable column titles",
+    )
+    parser.add_argument(
+        "--field-id-row",
+        type=int,
+        default=2,
+        help="Row containing field IDs",
+    )
+    parser.add_argument(
+        "--mandatory-row",
+        type=int,
+        default=3,
+        help="Row in which it is specified if a field is mandatory or not",
+    )
+    parser.add_argument(
+        "--description-row",
+        type=int,
+        default=4,
+        help="Row containing the description text",
+    )
+    parser.add_argument(
+        "--validity-range-row",
+        type=int,
+        default=5,
+        help="Row containing the definition of validity ranges",
+    )
     try:
         import argcomplete
 
@@ -107,11 +137,11 @@ def main():
     doc_title = args.title or title_from_source(source)
     skip_sheets = {sheet.casefold() for sheet in args.skip_sheet}
     summary_rows = {
-        args.display_row,
-        args.field_row,
-        args.status_row,
+        args.title_row,
+        args.field_id_row,
+        args.mandatory_row,
         args.description_row,
-        args.details_row,
+        args.validity_range_row,
     }
 
     wb = load_workbook(source, read_only=True, data_only=False)
@@ -131,24 +161,24 @@ def main():
         lines.extend([ws.title, underline(ws.title, "-"), ""])
 
         for col in used_columns(ws, summary_rows):
-            display_name = cell_text(ws.cell(row=args.display_row, column=col).value)
-            field_name = cell_text(ws.cell(row=args.field_row, column=col).value)
-            status = cell_text(ws.cell(row=args.status_row, column=col).value)
+            title = cell_text(ws.cell(row=args.title_row, column=col).value)
+            field_id = cell_text(ws.cell(row=args.field_id_row, column=col).value)
+            mandatory = cell_text(ws.cell(row=args.mandatory_row, column=col).value)
             description = cell_text(ws.cell(row=args.description_row, column=col).value)
-            details = cell_text(ws.cell(row=args.details_row, column=col).value)
+            validity_range = cell_text(ws.cell(row=args.validity_range_row, column=col).value)
 
-            column_title = display_name or field_name or f"Column {col}"
+            column_title = title or field_id or f"Column {col}"
             lines.extend([column_title, underline(column_title, "~")])
-            field_block(lines, "Field name", field_name)
-            field_block(lines, "Required", status)
+            field_block(lines, "Field name", field_id)
+            field_block(lines, "Required", mandatory)
 
             if description:
                 lines.extend(["", "Description", "^^^^^^^^^^^", ""])
                 literal_block(lines, description)
 
-            if details:
+            if validity_range:
                 lines.extend(["", "Constraints", "^^^^^^^^^^^^^^^^^^^^^^", ""])
-                literal_block(lines, details)
+                literal_block(lines, validity_range)
 
             lines.append("")
 
