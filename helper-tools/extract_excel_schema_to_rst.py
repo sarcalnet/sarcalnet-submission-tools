@@ -55,7 +55,10 @@ DEFAULT_INFO_ROWS = FieldInfoRows()
 
 class DataModel:
     def __init__(
-        self, filename, skip_sheet: Collection[str] = DEFAULT_SKIP_SHEETS
+        self,
+        filename,
+        skip_sheet: Collection[str] = DEFAULT_SKIP_SHEETS,
+        field_info_rows: FieldInfoRows = DEFAULT_INFO_ROWS,
     ):
         self._wb = openpyxl.load_workbook(
             filename,
@@ -63,6 +66,7 @@ class DataModel:
             data_only=False,
         )
         self._skip_sheets = {sheet.casefold() for sheet in skip_sheet}
+        self._field_info_rows = FieldInfoRows(*field_info_rows)
 
     def iter_sections(self) -> Iterator[str]:
         for title in self._wb.sheetnames:
@@ -70,7 +74,7 @@ class DataModel:
                 yield title
 
     @functools.cache  # noqa: B019
-    def _used_columns(self, section: str, rows: FieldInfoRows):
+    def _used_columns(self, section: str, rows: FieldInfoRows) -> list[int]:
         ws = self._wb[section]
         columns = []
         for col in range(1, ws.max_column + 1):
@@ -84,8 +88,12 @@ class DataModel:
         return "" if value is None else str(value)
 
     def iter_fields(
-        self, section: str, info_rows: FieldInfoRows = DEFAULT_INFO_ROWS,
+        self, section: str, info_rows: FieldInfoRows | None = None,
     ) -> Iterator[FieldInfo]:
+        info_rows: FieldInfoRows = (
+            info_rows if info_rows is not None else self._field_info_rows
+        )
+
         ws = self._wb[section]
         for col in self._used_columns(section, info_rows):
             yield FieldInfo(
@@ -203,7 +211,9 @@ def main():
         validity_range=args.validity_range_row,
     )
 
-    model = DataModel(source, skip_sheet=skip_sheets)
+    model = DataModel(
+        source, skip_sheet=skip_sheets, field_info_rows=field_info_rows
+    )
 
     lines = [
         doc_title,
@@ -216,7 +226,7 @@ def main():
     for section in model.iter_sections():
         lines.extend([section, underline(section, "-"), ""])
 
-        for field_info in model.iter_fields(section, info_rows=field_info_rows):
+        for field_info in model.iter_fields(section):
             column_title = (field_info.title or field_info.field_id)
             lines.extend([column_title, underline(column_title, "~")])
             field_block(lines, "Field name", field_info.field_id)
