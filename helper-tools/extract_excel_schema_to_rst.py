@@ -91,11 +91,12 @@ def parse_args():
         default=list(DEFAULT_SKIP_SHEETS),
         help="Sheet name to skip. Can be repeated. Defaults to README and definitions",
     )
-    parser.add_argument("--display-row", type=int, default=1, help="Row containing human-readable column titles")
-    parser.add_argument("--field-row", type=int, default=2, help="Row containing technical field names")
-    parser.add_argument("--status-row", type=int, default=3, help="Row containing status values")
-    parser.add_argument("--description-row", type=int, default=4, help="Row containing the description text")
-    parser.add_argument("--details-row", type=int, default=5, help="Row containing additional information")
+    try:
+        import argcomplete
+
+        argcomplete.autocomplete(parser)
+    except ImportError:
+        pass
     return parser.parse_args()
 
 
