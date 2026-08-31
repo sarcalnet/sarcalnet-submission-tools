@@ -23,6 +23,7 @@
 # python extract_excel_schema_to_rst.py /path/to/template.xlsx
 
 
+import abc
 import argparse
 import functools
 import re
@@ -115,30 +116,114 @@ class DataModel:
             )
 
 
-def underline(title, char):
-    return char * max(len(title), 3)
+class BaseFarmatter(abc.ABC):
+    def __init__(
+        self,
+        model: DataModel,
+        title: str,
+        preamble: Collection[str] | None = None,
+    ):
+        self.model = model
+        self.title = title
+        self.preamble: list[str] = preamble if preamble is not None else []
+
+    @staticmethod
+    def make_title(title, char) -> list[str]:
+        return [
+            title,
+            char * max(len(title), 3),
+            # "",
+        ]
+
+    @staticmethod
+    def literal_block(text):
+        lines = []
+
+        if not text:
+            return lines
+        lines.append("::")
+        lines.append("")
+        for raw_line in text.splitlines():
+            lines.append(f"   {raw_line}" if raw_line else "   ")
+
+        return lines
+
+    @staticmethod
+    def field_block(label, value):
+        lines = []
+        if value:
+            lines.append(f":{label}: {value}")
+        return lines
+
+    @abc.abstractmethod
+    def format_doc(self) -> list[str]:
+        pass
+
+    def generate_doc(self) -> str:
+        lines = self.format_doc()
+        data = "\n".join(lines).rstrip() + "\n"
+        return data
 
 
-def literal_block(lines, text):
-    if not text:
-        return
-    lines.append("::")
-    lines.append("")
-    for raw_line in text.splitlines():
-        lines.append(f"   {raw_line}" if raw_line else "   ")
+class SinglefileFarmatter(BaseFarmatter):
+    def format_field(self, field_info: FieldInfo) -> list[str]:
+        lines = []
+
+        column_title = (field_info.title or field_info.field_id)
+        lines.extend(self.make_title(column_title, "~"))
+        lines.extend(self.field_block("Field name", field_info.field_id))
+        lines.extend(self.field_block("Required", field_info.mandatory))
+
+        if field_info.description:
+            lines.append("")
+            lines.extend(self.make_title("Description", "^"))
+            lines.append("")
+            lines.extend(self.literal_block(field_info.description))
+
+        if field_info.validity_range:
+            lines.append("")
+            lines.extend(self.make_title("Constraints", "^"))
+            lines.append("")
+            lines.extend(self.literal_block(field_info.validity_range))
+
+        return lines
+
+    def format_section(self, section: str) -> list[str]:
+        lines = []
+
+        lines.extend(self.make_title(section, "-"))
+        lines.append("")
+
+        for field_info in self.model.iter_fields(section):
+            lines.extend(self.format_field(field_info))
+            lines.append("")
+
+        return lines
+
+    def format_doc(self) -> list[str]:
+        lines = []
+        lines.extend(self.make_title(self.title, "="))
+        if self.preamble:
+            lines.append("")
+            lines.extend(self.preamble)
+            lines.append("")
+
+        for section in self.model.iter_sections():
+            section_lines = self.format_section(section)
+            lines.extend(section_lines)
+
+        return lines
 
 
-def field_block(lines, label, value):
-    if value:
-        lines.append(f":{label}: {value}")
-
-
-def title_from_source(source):
+def title_from_source(source: Path):
     stem = source.stem
     stem = re.sub(r"_v\d+(?:\.\d+)*$", "", stem)
     stem = stem.replace("_submission_template", " Submission Template")
     words = stem.replace("_", " ").replace("-", " ").split()
-    return " ".join("SARCalNet" if word.lower() == "sarcalnet" else word.title() for word in words)
+    return " ".join(
+        "SARCalNet" if word.lower() == "sarcalnet" else word.title()
+        for word in words
+    )
 
 
 def parse_args():
@@ -215,34 +300,11 @@ def main():
         source, skip_sheet=skip_sheets, field_info_rows=field_info_rows
     )
 
-    lines = [
-        doc_title,
-        underline(doc_title, "="),
-        "",
-        f"Source file: ``{source.name}``",
-        "",
-    ]
+    preamble = [f"Source file: ``{source.name}``"]
+    formatter = SinglefileFarmatter(model, doc_title, preamble=preamble)
+    data = formatter.generate_doc()
 
-    for section in model.iter_sections():
-        lines.extend([section, underline(section, "-"), ""])
-
-        for field_info in model.iter_fields(section):
-            column_title = (field_info.title or field_info.field_id)
-            lines.extend([column_title, underline(column_title, "~")])
-            field_block(lines, "Field name", field_info.field_id)
-            field_block(lines, "Required", field_info.mandatory)
-
-            if field_info.description:
-                lines.extend(["", "Description", "^^^^^^^^^^^", ""])
-                literal_block(lines, field_info.description)
-
-            if field_info.validity_range:
-                lines.extend(["", "Constraints", "^^^^^^^^^^^^^^^^^^^^^^", ""])
-                literal_block(lines, field_info.validity_range)
-
-            lines.append("")
-
-    output.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    output.write_text(data, encoding="utf-8")
     print(output.resolve())
 
 
