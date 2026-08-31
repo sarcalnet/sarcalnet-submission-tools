@@ -38,6 +38,14 @@ class FieldInfoRows(NamedTuple):
     validity_range: int = 5
 
 
+class FieldInfo(NamedTuple):
+    title: str
+    field_id: str
+    mandatory: str
+    description: str
+    validity_range: str
+
+
 DEFAULT_SKIP_SHEETS = frozenset({"README", "definitions"})
 DEFAULT_INFO_ROWS = FieldInfoRows()
 
@@ -169,24 +177,26 @@ def main():
         lines.extend([ws.title, underline(ws.title, "-"), ""])
 
         for col in used_columns(ws, field_info_rows):
-            title = cell_text(ws.cell(row=field_info_rows.title, column=col).value)
-            field_id = cell_text(ws.cell(row=field_info_rows.field_id, column=col).value)
-            mandatory = cell_text(ws.cell(row=field_info_rows.mandatory, column=col).value)
-            description = cell_text(ws.cell(row=field_info_rows.description, column=col).value)
-            validity_range = cell_text(ws.cell(row=field_info_rows.validity_range, column=col).value)
+            field_info = FieldInfo(
+                title=cell_text(ws.cell(row=field_info_rows.title, column=col).value),
+                field_id=cell_text(ws.cell(row=field_info_rows.field_id, column=col).value),
+                mandatory=cell_text(ws.cell(row=field_info_rows.mandatory, column=col).value),
+                description=cell_text(ws.cell(row=field_info_rows.description, column=col).value),
+                validity_range=cell_text(ws.cell(row=field_info_rows.validity_range, column=col).value),
+            )
 
-            column_title = title or field_id or f"Column {col}"
+            column_title = field_info.title or field_info.field_id or f"Column {col}"
             lines.extend([column_title, underline(column_title, "~")])
-            field_block(lines, "Field name", field_id)
-            field_block(lines, "Required", mandatory)
+            field_block(lines, "Field name", field_info.field_id)
+            field_block(lines, "Required", field_info.mandatory)
 
-            if description:
+            if field_info.description:
                 lines.extend(["", "Description", "^^^^^^^^^^^", ""])
-                literal_block(lines, description)
+                literal_block(lines, field_info.description)
 
-            if validity_range:
+            if field_info.validity_range:
                 lines.extend(["", "Constraints", "^^^^^^^^^^^^^^^^^^^^^^", ""])
-                literal_block(lines, validity_range)
+                literal_block(lines, field_info.validity_range)
 
             lines.append("")
 
