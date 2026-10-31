@@ -43,13 +43,13 @@ The input template file in XLSX format is assumed to have:
 
 """
 
+import re
 import abc
 import argparse
 import functools
-import re
-from collections.abc import Collection, Iterator
-from pathlib import Path
 from typing import NamedTuple
+from pathlib import Path
+from collections.abc import Iterator, Collection
 
 import openpyxl
 
@@ -109,7 +109,9 @@ class DataModel:
         return "" if value is None else str(value)
 
     def iter_fields(
-        self, section: str, info_rows: FieldInfoRows | None = None,
+        self,
+        section: str,
+        info_rows: FieldInfoRows | None = None,
     ) -> Iterator[FieldInfo]:
         info_rows: FieldInfoRows = (
             info_rows if info_rows is not None else self._field_info_rows
@@ -188,7 +190,7 @@ class SinglefileFormatter(BaseFormatter):
     def format_field(self, field_info: FieldInfo) -> list[str]:
         lines = []
 
-        column_title = (field_info.title or field_info.field_id)
+        column_title = field_info.title or field_info.field_id
         lines.extend(self.make_title(column_title, "~"))
         lines.extend(self.field_block("Field name", field_info.field_id))
         lines.extend(self.field_block("Required", field_info.mandatory))
@@ -247,44 +249,54 @@ def title_from_source(source: Path):
 
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("source", type=Path, help="Input .xlsx workbook")
-    parser.add_argument("--output", type=Path, help="Output .rst file. Defaults to <source-stem>.rst")
-    parser.add_argument("--title", help="Document title. Defaults to a readable title from the source file name")
+    parser.add_argument("source", type=Path, help="Input XSLX file.")
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="Output .rst file. Defaults to '<source-stem>.rst'.",
+    )
+    parser.add_argument(
+        "--title",
+        help=(
+            "Document title. Defaults to a readable title from the source "
+            "file name."
+        ),
+    )
     parser.add_argument(
         "--skip-sheet",
         action="append",
         default=list(DEFAULT_SKIP_SHEETS),
-        help="Sheet name to skip. Can be repeated. Defaults to README and definitions",
+        help="Sheet name to skip. Can be repeated. Defaults: %(default)s.",
     )
     parser.add_argument(
         "--title-row",
         type=int,
         default=DEFAULT_INFO_ROWS.title,
-        help="Row containing human-readable column titles",
+        help="Row containing human-readable column titles.",
     )
     parser.add_argument(
         "--field-id-row",
         type=int,
         default=DEFAULT_INFO_ROWS.field_id,
-        help="Row containing field IDs",
+        help="Row containing field IDs.",
     )
     parser.add_argument(
         "--mandatory-row",
         type=int,
         default=DEFAULT_INFO_ROWS.mandatory,
-        help="Row in which it is specified if a field is mandatory or not",
+        help="Row in which it is specified if a field is mandatory or not.",
     )
     parser.add_argument(
         "--description-row",
         type=int,
         default=DEFAULT_INFO_ROWS.description,
-        help="Row containing the description text",
+        help="Row containing the description text.",
     )
     parser.add_argument(
         "--validity-range-row",
         type=int,
         default=DEFAULT_INFO_ROWS.validity_range,
-        help="Row containing the definition of validity ranges",
+        help="Row containing the definition of validity ranges.",
     )
     try:
         import argcomplete
