@@ -29,9 +29,19 @@
 # requires-python = ">=3.11"
 # ///
 
-# python extract_excel_schema_to_rst.py # prints usage
-# python extract_excel_schema_to_rst.py /path/to/template.xlsx
+"""Generate documentation for the SARCalNet submission template.
 
+The tool analyzes the SARCalNet submission template, extracts
+the documentation for each of the fields, and generate
+ReStructuredText documentation.
+
+The input template file in XLSX format is assumed to have:
+* display title in row 1,
+* field name in row 2,
+* indication of mandatory/optional fields in row 3,
+* literal comment blocks in rows 4-5.
+
+"""
 
 import abc
 import argparse
@@ -236,13 +246,7 @@ def title_from_source(source: Path):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(
-        description=(
-            "Generate an RST schema summary from an Excel workbook. By default, "
-            "row 1 is used as the display title, row 2 as the field name, row 3 "
-            "as the status, and rows 4-5 as literal comment blocks."
-        )
-    )
+    parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path, help="Input .xlsx workbook")
     parser.add_argument("--output", type=Path, help="Output .rst file. Defaults to <source-stem>.rst")
     parser.add_argument("--title", help="Document title. Defaults to a readable title from the source file name")
