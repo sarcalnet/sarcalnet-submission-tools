@@ -21,6 +21,14 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
 
+# /// script
+# dependencies = [
+#   "openpyxl",
+#   "argcomplete",
+# ]
+# requires-python = ">=3.11"
+# ///
+
 # python extract_excel_schema_to_rst.py # prints usage
 # python extract_excel_schema_to_rst.py /path/to/template.xlsx
 
