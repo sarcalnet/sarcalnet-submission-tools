@@ -1,5 +1,7 @@
-# The MIT License (MIT)
-# Copyright (c) 2025 by the xcube team
+# SPDX-License-Identifier: MIT
+#
+# Copyright (c) 2025, the xcube team
+#               2026, Antonio Valentino
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
 # copy of this software and associated documentation files (the "Software"),
