@@ -1,27 +1,27 @@
 ## SARCalNet submission tools
 
-This python package contains the SARCalNet submission tools. The tools can run 
+This python package contains the SARCalNet submission tools. The tools can run
 in two modes:
-1) validation mode. Basically, if no credentials to the SARCalNet 
+1) validation mode. Basically, if no credentials to the SARCalNet
 database are provided, the software validates the input calibration
-sites template, and exits. See below for directions on how to 
+sites template, and exits. See below for directions on how to
 run in validation mode.
-2) ingestion modes. If the credentials to the SARCalNet database 
+2) ingestion modes. If the credentials to the SARCalNet database
 are provided, the software validates the input calibration sites
-template, and in case it can successfully be validated, it 
+template, and in case it can successfully be validated, it
 stores its contents in the SARCalNet database.
 
-The software is run with the command `python ingester.py`. Running this 
+The software is run with the command `python ingester.py`. Running this
 command with the parameter `--help` prints its usage:
 
-Usage: 
+Usage:
 
 `ingester.py [OPTIONS] CALIBRATION_SITES_FILE SELF_ASSESSMENT_FILE`
 
 Ingests the calibration sites given in `CALIBRATION_SITES_FILE` into the
 database. Expects a self-assessment given as `SELF_ASSESSMENT_FILE`.
 
-See https://www.sarcalnet.org/submission-templates/ for directions and 
+See https://www.sarcalnet.org/submission-templates/ for directions and
 templates (only for registered users).
 
 If run without any of the parameters `client_id`, `client_secret`,
