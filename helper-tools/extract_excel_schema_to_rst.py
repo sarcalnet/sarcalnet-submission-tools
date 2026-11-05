@@ -116,7 +116,7 @@ class DataModel:
             )
 
 
-class BaseFarmatter(abc.ABC):
+class BaseFormatter(abc.ABC):
     def __init__(
         self,
         model: DataModel,
@@ -131,8 +131,7 @@ class BaseFarmatter(abc.ABC):
     def make_title(title, char) -> list[str]:
         return [
             title,
-            char * max(len(title), 3),
-            # "",
+            char * max(len(title), 3),            # "",
         ]
 
     @staticmethod
@@ -165,7 +164,7 @@ class BaseFarmatter(abc.ABC):
         return data
 
 
-class SinglefileFarmatter(BaseFarmatter):
+class SinglefileFormatter(BaseFormatter):
     def format_field(self, field_info: FieldInfo) -> list[str]:
         lines = []
 
@@ -301,7 +300,7 @@ def main():
     )
 
     preamble = [f"Source file: ``{source.name}``"]
-    formatter = SinglefileFarmatter(model, doc_title, preamble=preamble)
+    formatter = SinglefileFormatter(model, doc_title, preamble=preamble)
     data = formatter.generate_doc()
 
     output.write_text(data, encoding="utf-8")
