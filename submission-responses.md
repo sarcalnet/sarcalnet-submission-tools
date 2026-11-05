@@ -1,3 +1,20 @@
+
+### Upon receiving an email without submission form/self-assessment pdf (< 2 attachemnts)
+
+Dear user,
+
+many thanks for your attempt to contribute to the SARCalNet! However, you have not included
+the necessary number of attachments. Please ensure to attach:
+- the filled-in submission form as Excel document
+- the filled-in self-assessment form as PDF
+- (optionally) the license file.
+
+You can find templates for all of these documents on https://www.sarcalnet.org/submission-templates/.
+
+Kind regards
+
+SARCalNet team
+
 ### Upon receiving an email with submission form/self-assessment pdf and license file
 
 Dear user,
