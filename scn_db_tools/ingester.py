@@ -1,4 +1,5 @@
 import math
+import mimetypes
 import os
 import string
 import urllib
@@ -117,6 +118,7 @@ class Ingester:
         if self.validation_mode:
             return None
 
+        sites_df["active_until"] = sites_df["active_until"].astype(object)
         sites_df["active_until"] = sites_df["active_until"].replace("-", None)
         sites_df.insert(len(sites_df.columns), "endorsement", "review")
         sites_df.insert(len(sites_df.columns), "geometry", "POINT(0 0)")
@@ -528,7 +530,6 @@ class Ingester:
             "approx_azimuth_angle",
             "approx_boresight_angle",
             "primary_direction",
-            "side_length",
             "operational",
             "purpose",
         ]
@@ -590,21 +591,6 @@ class Ingester:
                 message = f"cr, row {row[0] + 6}: invalid entry for mandatory field "
                 f"'Approximate Elevation'. Please enter a valid "
                 f"floating point number."
-                if self.validation_mode:
-                    print(message)
-                else:
-                    raise ValueError(message)
-            try:
-                if not row[1]["side_length"] == "not provided":
-                    float(row[1]["side_length"])
-                    if row[1]["side_length"] <= 0:
-                        raise ValueError
-            except (ValueError, TypeError):
-                message = (
-                    f"cr, row {row[0] + 6}: invalid entry for mandatory field "
-                    f"'Side Length'. Please enter a valid "
-                    f"floating point number > 0."
-                )
                 if self.validation_mode:
                     print(message)
                 else:
@@ -906,12 +892,17 @@ class Ingester:
                 with open(filename, mode="rb") as photo_file:
                     contents = photo_file.read()
 
+                content_type = (
+                        mimetypes.guess_type(filename)[0]
+                        or "application/octet-stream"
+                )
+
                 upload_response = requests.post(
                     "https://www.sarcalnet.org/wp-json/wp/v2/media",
                     auth=HTTPBasicAuth("thomas", self.admin_password),
                     headers={
                         "Content-Disposition": f"attachment; filename={filename}",
-                        "Content-Type": "multipart/form-data",
+                        "Content-Type": content_type,
                     },
                     data=contents,
                 )
