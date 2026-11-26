@@ -463,6 +463,7 @@ class Ingester:
                 "Reference RCS measurement sensor": "rcs_measurement_conditions",
                 "Reference RCS measurement expected accuracy (dB)": "reference_rcs_accuracy",
                 "Reference RCS measurement boresite angle (decimal deg)": "reference_rcs_boresight_angle",
+                "Reference RCS measurement boresight angle (decimal deg)": "reference_rcs_boresight_angle",
                 "Reference RCS measurement wavelength (m)": "reference_rcs_wavelength",
                 "Reference RCS measurement bandwidth (Hz)": "reference_rcs_bandwidth",
                 "RCS accuracy determination method": "rcs_accuracy_determination",
