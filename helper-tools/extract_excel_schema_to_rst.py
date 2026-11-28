@@ -1,5 +1,7 @@
-# The MIT License (MIT)
-# Copyright (c) 2025 by the xcube team
+# SPDX-License-Identifier: MIT
+#
+# Copyright (c) 2025, the xcube team
+#               2026, Antonio Valentino
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
 # copy of this software and associated documentation files (the "Software"),
@@ -19,83 +21,289 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
 
-# python extract_excel_schema_to_rst.py # prints usage
-# python extract_excel_schema_to_rst.py /path/to/template.xlsx
+# /// script
+# dependencies = [
+#   "openpyxl",
+#   "argcomplete",
+# ]
+# requires-python = ">=3.11"
+# ///
 
+"""Generate documentation for the SARCalNet submission template.
 
-import argparse
+The tool analyzes the SARCalNet submission template, extracts
+the documentation for each of the fields, and generate
+ReStructuredText documentation.
+
+The input template file in XLSX format is assumed to have:
+* display title in row 1,
+* field name in row 2,
+* indication of mandatory/optional fields in row 3,
+* literal comment blocks in rows 4-5.
+
+"""
+
 import re
+import abc
+import argparse
+import functools
+from typing import NamedTuple
 from pathlib import Path
+from collections.abc import Iterator, Collection
 
-from openpyxl import load_workbook
-
-
-DEFAULT_SKIP_SHEETS = ("README", "definitions")
+import openpyxl
 
 
-def cell_text(value):
-    if value is None:
-        return ""
-    return str(value)
+class FieldInfoRows(NamedTuple):
+    title: int = 1
+    field_id: int = 2
+    mandatory: int = 3
+    description: int = 4
+    validity_range: int = 5
 
 
-def underline(title, char):
-    return char * max(len(title), 3)
+class FieldInfo(NamedTuple):
+    title: str
+    field_id: str
+    mandatory: str
+    description: str
+    validity_range: str
 
 
-def literal_block(lines, text):
-    if not text:
-        return
-    lines.append("::")
-    lines.append("")
-    for raw_line in text.splitlines():
-        lines.append(f"   {raw_line}" if raw_line else "   ")
+DEFAULT_SKIP_SHEETS = frozenset({"README", "definitions"})
+DEFAULT_INFO_ROWS = FieldInfoRows()
 
 
-def field_block(lines, label, value):
-    if value:
-        lines.append(f":{label}: {value}")
+class DataModel:
+    def __init__(
+        self,
+        filename,
+        skip_sheet: Collection[str] = DEFAULT_SKIP_SHEETS,
+        field_info_rows: FieldInfoRows = DEFAULT_INFO_ROWS,
+    ):
+        self._wb = openpyxl.load_workbook(
+            filename,
+            read_only=True,
+            data_only=False,
+        )
+        self._skip_sheets = {sheet.casefold() for sheet in skip_sheet}
+        self._field_info_rows = FieldInfoRows(*field_info_rows)
+
+    def iter_sections(self) -> Iterator[str]:
+        for title in self._wb.sheetnames:
+            if title.casefold() not in self._skip_sheets:
+                yield title
+
+    @functools.cache  # noqa: B019
+    def _used_columns(self, section: str, rows: FieldInfoRows) -> list[int]:
+        ws = self._wb[section]
+        columns = []
+        for col in range(1, ws.max_column + 1):
+            values = [ws.cell(row=row, column=col).value for row in rows]
+            if any(value is not None for value in values):
+                columns.append(col)
+        return columns
+
+    @staticmethod
+    def _cell_text(value):
+        return "" if value is None else str(value)
+
+    def iter_fields(
+        self,
+        section: str,
+        info_rows: FieldInfoRows | None = None,
+    ) -> Iterator[FieldInfo]:
+        info_rows: FieldInfoRows = (
+            info_rows if info_rows is not None else self._field_info_rows
+        )
+
+        ws = self._wb[section]
+        for col in self._used_columns(section, info_rows):
+            yield FieldInfo(
+                title=self._cell_text(
+                    ws.cell(row=info_rows.title, column=col).value
+                ),
+                field_id=self._cell_text(
+                    ws.cell(row=info_rows.field_id, column=col).value
+                ),
+                mandatory=self._cell_text(
+                    ws.cell(row=info_rows.mandatory, column=col).value
+                ),
+                description=self._cell_text(
+                    ws.cell(row=info_rows.description, column=col).value
+                ),
+                validity_range=self._cell_text(
+                    ws.cell(row=info_rows.validity_range, column=col).value
+                ),
+            )
 
 
-def used_columns(ws, rows):
-    columns = []
-    for col in range(1, ws.max_column + 1):
-        values = [ws.cell(row=row, column=col).value for row in rows]
-        if any(value is not None for value in values):
-            columns.append(col)
-    return columns
+class BaseFormatter(abc.ABC):
+    def __init__(
+        self,
+        model: DataModel,
+        title: str,
+        preamble: Collection[str] | None = None,
+    ):
+        self.model = model
+        self.title = title
+        self.preamble: list[str] = preamble if preamble is not None else []
+
+    @staticmethod
+    def make_title(title, char) -> list[str]:
+        return [
+            title,
+            char * max(len(title), 3),            # "",
+        ]
+
+    @staticmethod
+    def literal_block(text):
+        lines = []
+
+        if not text:
+            return lines
+        lines.append("::")
+        lines.append("")
+        for raw_line in text.splitlines():
+            lines.append(f"   {raw_line}" if raw_line else "   ")
+
+        return lines
+
+    @staticmethod
+    def field_block(label, value):
+        lines = []
+        if value:
+            lines.append(f":{label}: {value}")
+        return lines
+
+    @abc.abstractmethod
+    def format_doc(self) -> list[str]:
+        pass
+
+    def generate_doc(self) -> str:
+        lines = self.format_doc()
+        data = "\n".join(lines).rstrip() + "\n"
+        return data
 
 
-def title_from_source(source):
+class SinglefileFormatter(BaseFormatter):
+    def format_field(self, field_info: FieldInfo) -> list[str]:
+        lines = []
+
+        column_title = field_info.title or field_info.field_id
+        lines.extend(self.make_title(column_title, "~"))
+        lines.extend(self.field_block("Field name", field_info.field_id))
+        lines.extend(self.field_block("Required", field_info.mandatory))
+
+        if field_info.description:
+            lines.append("")
+            lines.extend(self.make_title("Description", "^"))
+            lines.append("")
+            lines.extend(self.literal_block(field_info.description))
+
+        if field_info.validity_range:
+            lines.append("")
+            lines.extend(self.make_title("Constraints", "^"))
+            lines.append("")
+            lines.extend(self.literal_block(field_info.validity_range))
+
+        return lines
+
+    def format_section(self, section: str) -> list[str]:
+        lines = []
+
+        lines.extend(self.make_title(section, "-"))
+        lines.append("")
+
+        for field_info in self.model.iter_fields(section):
+            lines.extend(self.format_field(field_info))
+            lines.append("")
+
+        return lines
+
+    def format_doc(self) -> list[str]:
+        lines = []
+        lines.extend(self.make_title(self.title, "="))
+        if self.preamble:
+            lines.append("")
+            lines.extend(self.preamble)
+            lines.append("")
+
+        for section in self.model.iter_sections():
+            section_lines = self.format_section(section)
+            lines.extend(section_lines)
+
+        return lines
+
+
+def title_from_source(source: Path):
     stem = source.stem
     stem = re.sub(r"_v\d+(?:\.\d+)*$", "", stem)
     stem = stem.replace("_submission_template", " Submission Template")
     words = stem.replace("_", " ").replace("-", " ").split()
-    return " ".join("SARCalNet" if word.lower() == "sarcalnet" else word.title() for word in words)
+    return " ".join(
+        "SARCalNet" if word.lower() == "sarcalnet" else word.title()
+        for word in words
+    )
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(
-        description=(
-            "Generate an RST schema summary from an Excel workbook. By default, "
-            "row 1 is used as the display title, row 2 as the field name, row 3 "
-            "as the status, and rows 4-5 as literal comment blocks."
-        )
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("source", type=Path, help="Input XSLX file.")
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="Output .rst file. Defaults to '<source-stem>.rst'.",
     )
-    parser.add_argument("source", type=Path, help="Input .xlsx workbook")
-    parser.add_argument("--output", type=Path, help="Output .rst file. Defaults to <source-stem>.rst")
-    parser.add_argument("--title", help="Document title. Defaults to a readable title from the source file name")
+    parser.add_argument(
+        "--title",
+        help=(
+            "Document title. Defaults to a readable title from the source "
+            "file name."
+        ),
+    )
     parser.add_argument(
         "--skip-sheet",
         action="append",
         default=list(DEFAULT_SKIP_SHEETS),
-        help="Sheet name to skip. Can be repeated. Defaults to README and definitions",
+        help="Sheet name to skip. Can be repeated. Defaults: %(default)s.",
     )
-    parser.add_argument("--display-row", type=int, default=1, help="Row containing human-readable column titles")
-    parser.add_argument("--field-row", type=int, default=2, help="Row containing technical field names")
-    parser.add_argument("--status-row", type=int, default=3, help="Row containing status values")
-    parser.add_argument("--description-row", type=int, default=4, help="Row containing the description text")
-    parser.add_argument("--details-row", type=int, default=5, help="Row containing additional information")
+    parser.add_argument(
+        "--title-row",
+        type=int,
+        default=DEFAULT_INFO_ROWS.title,
+        help="Row containing human-readable column titles.",
+    )
+    parser.add_argument(
+        "--field-id-row",
+        type=int,
+        default=DEFAULT_INFO_ROWS.field_id,
+        help="Row containing field IDs.",
+    )
+    parser.add_argument(
+        "--mandatory-row",
+        type=int,
+        default=DEFAULT_INFO_ROWS.mandatory,
+        help="Row in which it is specified if a field is mandatory or not.",
+    )
+    parser.add_argument(
+        "--description-row",
+        type=int,
+        default=DEFAULT_INFO_ROWS.description,
+        help="Row containing the description text.",
+    )
+    parser.add_argument(
+        "--validity-range-row",
+        type=int,
+        default=DEFAULT_INFO_ROWS.validity_range,
+        help="Row containing the definition of validity ranges.",
+    )
+    try:
+        import argcomplete
+
+        argcomplete.autocomplete(parser)
+    except ImportError:
+        pass
     return parser.parse_args()
 
 
@@ -105,53 +313,23 @@ def main():
     output = args.output or Path(f"{source.stem}.rst")
     doc_title = args.title or title_from_source(source)
     skip_sheets = {sheet.casefold() for sheet in args.skip_sheet}
-    summary_rows = {
-        args.display_row,
-        args.field_row,
-        args.status_row,
-        args.description_row,
-        args.details_row,
-    }
+    field_info_rows = FieldInfoRows(
+        title=args.title_row,
+        field_id=args.field_id_row,
+        mandatory=args.mandatory_row,
+        description=args.description_row,
+        validity_range=args.validity_range_row,
+    )
 
-    wb = load_workbook(source, read_only=True, data_only=False)
+    model = DataModel(
+        source, skip_sheet=skip_sheets, field_info_rows=field_info_rows
+    )
 
-    lines = [
-        doc_title,
-        underline(doc_title, "="),
-        "",
-        f"Source file: ``{source.name}``",
-        "",
-    ]
+    preamble = [f"Source file: ``{source.name}``"]
+    formatter = SinglefileFormatter(model, doc_title, preamble=preamble)
+    data = formatter.generate_doc()
 
-    for ws in wb.worksheets:
-        if ws.title.casefold() in skip_sheets:
-            continue
-
-        lines.extend([ws.title, underline(ws.title, "-"), ""])
-
-        for col in used_columns(ws, summary_rows):
-            display_name = cell_text(ws.cell(row=args.display_row, column=col).value)
-            field_name = cell_text(ws.cell(row=args.field_row, column=col).value)
-            status = cell_text(ws.cell(row=args.status_row, column=col).value)
-            description = cell_text(ws.cell(row=args.description_row, column=col).value)
-            details = cell_text(ws.cell(row=args.details_row, column=col).value)
-
-            column_title = display_name or field_name or f"Column {col}"
-            lines.extend([column_title, underline(column_title, "~")])
-            field_block(lines, "Field name", field_name)
-            field_block(lines, "Required", status)
-
-            if description:
-                lines.extend(["", "Description", "^^^^^^^^^^^", ""])
-                literal_block(lines, description)
-
-            if details:
-                lines.extend(["", "Constraints", "^^^^^^^^^^^^^^^^^^^^^^", ""])
-                literal_block(lines, details)
-
-            lines.append("")
-
-    output.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    output.write_text(data, encoding="utf-8")
     print(output.resolve())
 
 
